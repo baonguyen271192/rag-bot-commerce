@@ -1,0 +1,16 @@
+{
+  "name": "zalo-rag-backend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "commonjs",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "test": "node --test test/*.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^13.0.0",
+    "@lancedb/lancedb": "^0.13.0",
+    "express": "^4.21.0",
+    "multer": "^1.4.5-lts.1"
+  }
+}
