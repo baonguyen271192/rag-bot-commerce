@@ -6,7 +6,13 @@ const request = require('supertest');
 const { createApp } = require('../src/app');
 const { TenantStore } = require('../src/db');
 
-function makeApp({ searchResults = [], llmReply = 'ok', embedTexts = null, completeCalls = null } = {}) {
+function makeApp({
+  searchResults = [],
+  llmReply = 'ok',
+  embedTexts = null,
+  completeCalls = null,
+  llmClientOverride = null,
+} = {}) {
   const tenantStore = new TenantStore(':memory:');
   const vectorStore = {
     addedChunks: [],
@@ -21,15 +27,16 @@ function makeApp({ searchResults = [], llmReply = 'ok', embedTexts = null, compl
       return texts.map(() => [1, 0, 0]);
     },
   };
-  const llmClient = {
-    complete: async (args) => {
-      if (completeCalls) completeCalls.push(args);
-      return llmReply;
-    },
-  };
+  const llmClient =
+    llmClientOverride || {
+      complete: async (args) => {
+        if (completeCalls) completeCalls.push(args);
+        return llmReply;
+      },
+    };
   const { RagService } = require('../src/rag');
   const ragService = new RagService({ tenantStore, vectorStore, embeddingClient, llmClient });
-  const app = createApp({ tenantStore, vectorStore, embeddingClient, ragService });
+  const app = createApp({ tenantStore, vectorStore, embeddingClient, ragService, llmClient });
   return { app, tenantStore, vectorStore, embeddingClient };
 }
 
@@ -93,6 +100,59 @@ test('POST /tenants/:id/documents returns 404 for an unknown tenant', async () =
     .post('/tenants/unknown/documents')
     .attach('file', Buffer.from('content'), 'doc.md');
   assert.equal(res.status, 404);
+});
+
+test('POST /tenants/:id/documents extracts text from an uploaded image via the vision LLM before indexing', async () => {
+  const embedTexts = [];
+  const visionCalls = [];
+  const { app } = makeApp({
+    embedTexts,
+    llmClientOverride: {
+      complete: async (args) => {
+        visionCalls.push(args);
+        return 'Pho bo - 65000';
+      },
+    },
+  });
+  await request(app).post('/tenants').send({ id: 't1', name: 'A', systemPrompt: 'p' });
+
+  const res = await request(app)
+    .post('/tenants/t1/documents')
+    .attach('file', Buffer.from([0xff, 0xd8, 0xff]), { filename: 'menu.jpg', contentType: 'image/jpeg' });
+
+  assert.equal(res.status, 201);
+  assert.equal(visionCalls.length, 1);
+  assert.match(visionCalls[0].messages[0].content[1].image_url.url, /^data:image\/jpeg;base64,/);
+  assert.ok(embedTexts.length >= 1);
+  assert.match(embedTexts[0], /Pho bo/);
+});
+
+test('POST /tenants/:id/documents returns 422 when the vision LLM cannot read the image', async () => {
+  const { app } = makeApp({
+    llmClientOverride: {
+      complete: async () => {
+        throw new Error('bad image');
+      },
+    },
+  });
+  await request(app).post('/tenants').send({ id: 't1', name: 'A', systemPrompt: 'p' });
+
+  const res = await request(app)
+    .post('/tenants/t1/documents')
+    .attach('file', Buffer.from([0xff, 0xd8, 0xff]), { filename: 'menu.jpg', contentType: 'image/jpeg' });
+
+  assert.equal(res.status, 422);
+});
+
+test('POST /tenants/:id/documents returns 422 when the vision LLM extracts no usable text', async () => {
+  const { app } = makeApp({ llmClientOverride: { complete: async () => '   ' } });
+  await request(app).post('/tenants').send({ id: 't1', name: 'A', systemPrompt: 'p' });
+
+  const res = await request(app)
+    .post('/tenants/t1/documents')
+    .attach('file', Buffer.from([0xff, 0xd8, 0xff]), { filename: 'menu.jpg', contentType: 'image/jpeg' });
+
+  assert.equal(res.status, 422);
 });
 
 test('POST /tenants/:id/ask returns the RAG reply', async () => {

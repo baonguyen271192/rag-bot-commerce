@@ -27,7 +27,7 @@ function main() {
   });
   const ragService = new RagService({ tenantStore, vectorStore, embeddingClient, llmClient });
 
-  const app = createApp({ tenantStore, vectorStore, embeddingClient, ragService });
+  const app = createApp({ tenantStore, vectorStore, embeddingClient, ragService, llmClient });
   const port = process.env.PORT || 4001;
   app.listen(port, () => {
     console.log(`backend: listening on port ${port}`);

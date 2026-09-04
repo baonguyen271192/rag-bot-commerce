@@ -4,11 +4,16 @@ const express = require('express');
 const multer = require('multer');
 const { chunkText } = require('./chunker');
 
-const upload = multer({ storage: multer.memoryStorage() });
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
 
 const IMAGE_DATA_URI_RE = /^data:image\/(jpeg|png);base64,/;
+const IMAGE_MIMETYPES = { 'image/jpeg': true, 'image/png': true };
+const VISION_EXTRACT_SYSTEM_PROMPT =
+  'Ban la cong cu trich xuat noi dung tai lieu tu anh. Doc toan bo chu va thong tin trong anh ' +
+  '(ten mon, gia, mo ta, ghi chu...) va chep lai chinh xac, day du thanh van ban thuan. ' +
+  'Khong dinh dang markdown, khong them binh luan hay giai thich.';
 
-function createApp({ tenantStore, vectorStore, embeddingClient, ragService }) {
+function createApp({ tenantStore, vectorStore, embeddingClient, ragService, llmClient }) {
   const app = express();
   app.use(express.json({ limit: '10mb' }));
 
@@ -46,7 +51,32 @@ function createApp({ tenantStore, vectorStore, embeddingClient, ragService }) {
       if (!tenant) return res.status(404).json({ error: 'tenant not found' });
 
       const docId = `${req.file.originalname}_${Date.now()}`;
-      const text = req.file.buffer.toString('utf8');
+      let text;
+      if (IMAGE_MIMETYPES[req.file.mimetype]) {
+        const dataUri = `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`;
+        try {
+          text = await llmClient.complete({
+            systemPrompt: VISION_EXTRACT_SYSTEM_PROMPT,
+            messages: [
+              {
+                role: 'user',
+                content: [
+                  { type: 'text', text: 'Trich xuat noi dung anh nay.' },
+                  { type: 'image_url', image_url: { url: dataUri } },
+                ],
+              },
+            ],
+          });
+        } catch (err) {
+          return res.status(422).json({ error: `khong the doc noi dung anh: ${err.message}` });
+        }
+        if (!text || !text.trim()) {
+          return res.status(422).json({ error: 'anh khong co noi dung doc duoc' });
+        }
+      } else {
+        text = req.file.buffer.toString('utf8');
+      }
+
       const chunks = chunkText(text);
       const embeddings = await embeddingClient.embed(chunks);
       await vectorStore.addChunks(
