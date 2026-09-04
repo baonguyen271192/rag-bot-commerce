@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 const { chunkText } = require('../src/chunker');
 
 test('splits markdown into one chunk per top-level section', () => {
-  const md = '# Title\n\n## Section A\nContent A\n\n## Section B\nContent B\n';
+  const md = '## Section A\nContent A\n\n## Section B\nContent B\n';
   const chunks = chunkText(md);
   assert.equal(chunks.length, 2);
   assert.match(chunks[0], /Section A/);
@@ -39,4 +39,14 @@ test('keeps a short document with multiple small sections as separate chunks eve
   const md = '## A\nshort\n\n## B\nalso short\n';
   const chunks = chunkText(md, { maxChunkSize: 800 });
   assert.equal(chunks.length, 2);
+});
+
+test('preserves content that appears before the first ## heading', () => {
+  const md = '# Title\n\nIntro paragraph before any heading.\n\n## Section A\nContent A\n';
+  const chunks = chunkText(md);
+  assert.equal(chunks.length, 2);
+  assert.match(chunks[0], /Title/);
+  assert.match(chunks[0], /Intro paragraph/);
+  assert.match(chunks[1], /Section A/);
+  assert.match(chunks[1], /Content A/);
 });

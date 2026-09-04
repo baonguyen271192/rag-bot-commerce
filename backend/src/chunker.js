@@ -27,6 +27,11 @@ function chunkText(text, { maxChunkSize = 800 } = {}) {
   }
 
   const sections = [];
+  const firstHeadingStart = headingMatches[0].index;
+  if (firstHeadingStart > 0) {
+    const preamble = trimmed.slice(0, firstHeadingStart).trim();
+    if (preamble) sections.push(preamble);
+  }
   for (let i = 0; i < headingMatches.length; i++) {
     const start = headingMatches[i].index;
     const end = i + 1 < headingMatches.length ? headingMatches[i + 1].index : trimmed.length;
