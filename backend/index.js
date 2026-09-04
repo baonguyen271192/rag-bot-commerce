@@ -1,6 +1,7 @@
 'use strict';
 
 const path = require('node:path');
+const fs = require('node:fs');
 const { TenantStore } = require('./src/db');
 const { VectorStore } = require('./src/vectorstore');
 const { EmbeddingClient } = require('./src/embeddings');
@@ -15,7 +16,9 @@ function main() {
     throw new Error('OPENAI_API_KEY and OPENROUTER_API_KEY env vars are required');
   }
 
-  const tenantStore = new TenantStore(process.env.SQLITE_PATH || path.join(__dirname, 'data', 'tenants.db'));
+  const sqlitePath = process.env.SQLITE_PATH || path.join(__dirname, 'data', 'tenants.db');
+  fs.mkdirSync(path.dirname(sqlitePath), { recursive: true });
+  const tenantStore = new TenantStore(sqlitePath);
   const vectorStore = new VectorStore({ dbPath: process.env.LANCE_PATH || path.join(__dirname, 'data', 'vectors') });
   const embeddingClient = new EmbeddingClient({ apiKey: openaiApiKey });
   const llmClient = new LLMClient({

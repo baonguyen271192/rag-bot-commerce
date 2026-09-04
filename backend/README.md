@@ -18,7 +18,6 @@ Multi-tenant RAG API: mỗi tenant (nhà hàng) có tài liệu và lịch sử 
 
 ```bash
 npm install
-mkdir -p data
 OPENAI_API_KEY=... OPENROUTER_API_KEY=... node index.js
 ```
 
