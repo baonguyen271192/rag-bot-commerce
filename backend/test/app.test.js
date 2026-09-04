@@ -6,7 +6,7 @@ const request = require('supertest');
 const { createApp } = require('../src/app');
 const { TenantStore } = require('../src/db');
 
-function makeApp({ searchResults = [], llmReply = 'ok', embedTexts = null } = {}) {
+function makeApp({ searchResults = [], llmReply = 'ok', embedTexts = null, completeCalls = null } = {}) {
   const tenantStore = new TenantStore(':memory:');
   const vectorStore = {
     addedChunks: [],
@@ -21,7 +21,12 @@ function makeApp({ searchResults = [], llmReply = 'ok', embedTexts = null } = {}
       return texts.map(() => [1, 0, 0]);
     },
   };
-  const llmClient = { complete: async () => llmReply };
+  const llmClient = {
+    complete: async (args) => {
+      if (completeCalls) completeCalls.push(args);
+      return llmReply;
+    },
+  };
   const { RagService } = require('../src/rag');
   const ragService = new RagService({ tenantStore, vectorStore, embeddingClient, llmClient });
   const app = createApp({ tenantStore, vectorStore, embeddingClient, ragService });
@@ -106,4 +111,32 @@ test('POST /tenants/:id/ask returns 404 for an unknown tenant', async () => {
   const { app } = makeApp();
   const res = await request(app).post('/tenants/unknown/ask').send({ conversationId: 'c1', text: 'hi' });
   assert.equal(res.status, 404);
+});
+
+test('POST /tenants/:id/ask accepts an optional image and forwards it as vision content', async () => {
+  const completeCalls = [];
+  const { app } = makeApp({ completeCalls });
+  await request(app).post('/tenants').send({ id: 't1', name: 'A', systemPrompt: 'p' });
+
+  const res = await request(app)
+    .post('/tenants/t1/ask')
+    .send({ conversationId: 'c1', text: 'day la mon gi?', image: 'data:image/jpeg;base64,AAA=' });
+
+  assert.equal(res.status, 200);
+  const lastMessage = completeCalls[0].messages[completeCalls[0].messages.length - 1];
+  assert.deepEqual(lastMessage.content[1], {
+    type: 'image_url',
+    image_url: { url: 'data:image/jpeg;base64,AAA=' },
+  });
+});
+
+test('POST /tenants/:id/ask rejects a malformed image field', async () => {
+  const { app } = makeApp();
+  await request(app).post('/tenants').send({ id: 't1', name: 'A', systemPrompt: 'p' });
+
+  const res = await request(app)
+    .post('/tenants/t1/ask')
+    .send({ conversationId: 'c1', text: 'hi', image: 'not-a-data-uri' });
+
+  assert.equal(res.status, 400);
 });

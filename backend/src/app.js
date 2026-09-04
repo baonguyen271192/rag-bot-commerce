@@ -6,9 +6,11 @@ const { chunkText } = require('./chunker');
 
 const upload = multer({ storage: multer.memoryStorage() });
 
+const IMAGE_DATA_URI_RE = /^data:image\/(jpeg|png);base64,/;
+
 function createApp({ tenantStore, vectorStore, embeddingClient, ragService }) {
   const app = express();
-  app.use(express.json());
+  app.use(express.json({ limit: '10mb' }));
 
   app.post('/tenants', (req, res) => {
     const { id, name, systemPrompt } = req.body;
@@ -62,10 +64,18 @@ function createApp({ tenantStore, vectorStore, embeddingClient, ragService }) {
       const tenant = tenantStore.getTenant(req.params.id);
       if (!tenant) return res.status(404).json({ error: 'tenant not found' });
 
+      const { image } = req.body;
+      if (image !== undefined && !IMAGE_DATA_URI_RE.test(image)) {
+        return res
+          .status(400)
+          .json({ error: 'image must be a data:image/jpeg or data:image/png base64 URI' });
+      }
+
       const reply = await ragService.answer({
         tenantId: req.params.id,
         conversationId: req.body.conversationId,
         text: req.body.text,
+        image,
       });
       res.json({ reply });
     } catch (err) {
