@@ -9,8 +9,8 @@
   },
   "dependencies": {
     "better-sqlite3": "^13.0.0",
-    "@lancedb/lancedb": "^0.13.0",
-    "express": "^4.21.0",
-    "multer": "^1.4.5-lts.1"
+    "@lancedb/lancedb": "^0.37.1",
+    "express": "^5.0.0",
+    "multer": "^2.0.0"
   }
 }
