@@ -43,6 +43,14 @@ test('POST /tenants creates a tenant and GET /tenants lists it', async () => {
   assert.equal(listRes.body[0].name, 'Truc Lam Vien');
 });
 
+test('POST /tenants rejects an invalid tenant id', async () => {
+  const { app } = makeApp();
+  const res = await request(app)
+    .post('/tenants')
+    .send({ id: "bad id/with'quote", name: 'A', systemPrompt: 'p' });
+  assert.equal(res.status, 400);
+});
+
 test('GET /tenants/:id returns 404 for an unknown tenant', async () => {
   const { app } = makeApp();
   const res = await request(app).get('/tenants/nope');

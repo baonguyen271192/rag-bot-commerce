@@ -12,6 +12,11 @@ function createApp({ tenantStore, vectorStore, embeddingClient, ragService }) {
 
   app.post('/tenants', (req, res) => {
     const { id, name, systemPrompt } = req.body;
+    if (!id || !/^[a-z0-9-]+$/.test(id)) {
+      return res
+        .status(400)
+        .json({ error: 'id must be a non-empty string of lowercase letters, digits, and hyphens only' });
+    }
     const tenant = tenantStore.createTenant({ id, name, systemPrompt });
     res.status(201).json(tenant);
   });
