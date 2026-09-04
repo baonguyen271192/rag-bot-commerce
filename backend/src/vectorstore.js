@@ -69,7 +69,8 @@ class VectorStore {
     const table = await this._openExistingTable(tenantId);
     if (!table) return;
 
-    await table.delete(`docId = '${docId}'`);
+    const escapedDocId = docId.replace(/'/g, "''");
+    await table.delete(`docId = '${escapedDocId}'`);
   }
 
   async close() {

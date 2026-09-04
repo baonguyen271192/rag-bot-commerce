@@ -63,3 +63,18 @@ test('deleteDocument removes only chunks belonging to that document', async () =
   assert.equal(results[0].text, 'from doc2');
   await store.close();
 });
+
+test('deleteDocument handles a docId containing a single quote correctly', async () => {
+  const store = new VectorStore({ dbPath: tempDbPath() });
+  await store.addChunks('t1', [
+    { text: 'from doc with quote', embedding: [1, 0], docId: "nha hang's menu.md_123" },
+    { text: 'from a different doc', embedding: [1, 0], docId: 'other-doc' },
+  ]);
+
+  await store.deleteDocument('t1', "nha hang's menu.md_123");
+  const results = await store.search('t1', [1, 0], 10);
+
+  assert.equal(results.length, 1);
+  assert.equal(results[0].text, 'from a different doc');
+  await store.close();
+});
