@@ -96,3 +96,33 @@ test('answer throws when the tenant does not exist', async () => {
     /tenant not found/i
   );
 });
+
+test('answer attaches the image to the current turn as vision content when provided, but does not persist it', async () => {
+  const fakes = makeFakes({
+    tenant: { id: 't1', systemPrompt: 'p' },
+    searchResults: [],
+    llmReply: 'day la mon pho',
+  });
+  const rag = new RagService(fakes);
+
+  await rag.answer({
+    tenantId: 't1',
+    conversationId: 'c1',
+    text: 'day la mon gi?',
+    image: 'data:image/jpeg;base64,AAA=',
+  });
+
+  const llmCall = fakes.completeCalls[0];
+  const currentMessage = llmCall.messages[llmCall.messages.length - 1];
+  assert.deepEqual(currentMessage, {
+    role: 'user',
+    content: [
+      { type: 'text', text: 'day la mon gi?' },
+      { type: 'image_url', image_url: { url: 'data:image/jpeg;base64,AAA=' } },
+    ],
+  });
+  assert.deepEqual(fakes.savedMessages, [
+    { tenantId: 't1', conversationId: 'c1', role: 'user', text: 'day la mon gi?' },
+    { tenantId: 't1', conversationId: 'c1', role: 'assistant', text: 'day la mon pho' },
+  ]);
+});

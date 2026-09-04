@@ -10,7 +10,7 @@ class RagService {
     this.llmClient = llmClient;
   }
 
-  async answer({ tenantId, conversationId, text }) {
+  async answer({ tenantId, conversationId, text, image }) {
     const tenant = this.tenantStore.getTenant(tenantId);
     if (!tenant) {
       throw new Error(`tenant not found: ${tenantId}`);
@@ -28,9 +28,19 @@ class RagService {
       ? `Thong tin tham khao:\n${context}\n\nCau hoi cua khach: ${text}`
       : text;
 
+    const currentMessage = image
+      ? {
+          role: 'user',
+          content: [
+            { type: 'text', text: contextBlock },
+            { type: 'image_url', image_url: { url: image } },
+          ],
+        }
+      : { role: 'user', content: contextBlock };
+
     const reply = await this.llmClient.complete({
       systemPrompt: tenant.systemPrompt,
-      messages: [...history, { role: 'user', content: contextBlock }],
+      messages: [...history, currentMessage],
     });
 
     this.tenantStore.addMessage({ tenantId, conversationId, role: 'user', text });
