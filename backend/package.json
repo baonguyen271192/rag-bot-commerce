@@ -10,6 +10,7 @@
   "dependencies": {
     "better-sqlite3": "^13.0.0",
     "@lancedb/lancedb": "^0.37.1",
+    "apache-arrow": "^18.1.0",
     "express": "^5.0.0",
     "multer": "^2.0.0"
   }
