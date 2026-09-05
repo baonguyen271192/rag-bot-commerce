@@ -15,10 +15,12 @@ class BackendClient {
   }
 
   async ask(tenantId, { conversationId, text, image }) {
+    const body = { conversationId, text };
+    if (image) body.image = image;
     const res = await this.fetch(`${this.baseUrl}/tenants/${tenantId}/ask`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ conversationId, text, image }),
+      body: JSON.stringify(body),
     });
     if (!res.ok) {
       throw new Error(`ask failed with status ${res.status}`);
