@@ -2,6 +2,7 @@
 
 const express = require('express');
 const multer = require('multer');
+const cors = require('cors');
 const { chunkText } = require('./chunker');
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
@@ -15,6 +16,7 @@ const VISION_EXTRACT_SYSTEM_PROMPT =
 
 function createApp({ tenantStore, vectorStore, embeddingClient, ragService, llmClient }) {
   const app = express();
+  app.use(cors());
   app.use(express.json({ limit: '10mb' }));
 
   app.post('/tenants', (req, res) => {

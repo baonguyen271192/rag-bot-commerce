@@ -59,6 +59,12 @@ test('POST /tenants creates a tenant and GET /tenants lists it', async () => {
   assert.equal(listRes.body[0].name, 'Truc Lam Vien');
 });
 
+test('responses include a permissive CORS header for admin-ui', async () => {
+  const { app } = makeApp();
+  const res = await request(app).get('/tenants');
+  assert.ok(res.headers['access-control-allow-origin']);
+});
+
 test('POST /tenants rejects an invalid tenant id', async () => {
   const { app } = makeApp();
   const res = await request(app)
