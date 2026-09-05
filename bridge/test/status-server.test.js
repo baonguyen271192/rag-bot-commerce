@@ -31,6 +31,12 @@ test('GET /sessions lists every tenant currently in the registry', async () => {
   );
 });
 
+test('responses include a permissive CORS header for admin-ui', async () => {
+  const app = createStatusServer({ statusRegistry: new Map(), dataDir: makeDataDir() });
+  const res = await request(app).get('/sessions');
+  assert.ok(res.headers['access-control-allow-origin']);
+});
+
 test('GET /tenants/:id/qr-status returns 404 for an unknown tenant', async () => {
   const app = createStatusServer({ statusRegistry: new Map(), dataDir: makeDataDir() });
   const res = await request(app).get('/tenants/unknown/qr-status');

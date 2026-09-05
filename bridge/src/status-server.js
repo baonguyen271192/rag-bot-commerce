@@ -3,9 +3,11 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const express = require('express');
+const cors = require('cors');
 
 function createStatusServer({ statusRegistry, dataDir }) {
   const app = express();
+  app.use(cors());
 
   app.get('/sessions', (req, res) => {
     const sessions = Array.from(statusRegistry.entries()).map(([tenantId, status]) => ({ tenantId, ...status }));

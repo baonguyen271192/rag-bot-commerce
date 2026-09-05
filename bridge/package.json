@@ -10,6 +10,7 @@
     "test": "node --test 'test/**/*.js'"
   },
   "dependencies": {
+    "cors": "^2.8.6",
     "express": "^5.0.0",
     "zca-js": "^2.1.2"
   },
