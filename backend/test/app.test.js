@@ -20,6 +20,10 @@ function makeApp({
       this.addedChunks.push({ tenantId, chunks });
     },
     search: async () => searchResults,
+    deletedDocuments: [],
+    deleteDocument: async function (tenantId, docId) {
+      this.deletedDocuments.push({ tenantId, docId });
+    },
   };
   const embeddingClient = {
     embed: async (texts) => {
@@ -99,6 +103,72 @@ test('POST /tenants/:id/documents returns 404 for an unknown tenant', async () =
   const res = await request(app)
     .post('/tenants/unknown/documents')
     .attach('file', Buffer.from('content'), 'doc.md');
+  assert.equal(res.status, 404);
+});
+
+test('POST /tenants/:id/documents records the upload, and GET /tenants/:id/documents lists it', async () => {
+  const { app } = makeApp();
+  await request(app).post('/tenants').send({ id: 't1', name: 'A', systemPrompt: 'p' });
+
+  const uploadRes = await request(app)
+    .post('/tenants/t1/documents')
+    .attach('file', Buffer.from('## Menu\nPho bo - 65000\n'), 'menu.md');
+  assert.equal(uploadRes.status, 201);
+
+  const listRes = await request(app).get('/tenants/t1/documents');
+  assert.equal(listRes.status, 200);
+  assert.equal(listRes.body.length, 1);
+  assert.equal(listRes.body[0].id, uploadRes.body.docId);
+  assert.equal(listRes.body[0].filename, 'menu.md');
+  assert.equal(listRes.body[0].chunkCount, uploadRes.body.chunkCount);
+});
+
+test('GET /tenants/:id/documents returns 404 for an unknown tenant', async () => {
+  const { app } = makeApp();
+  const res = await request(app).get('/tenants/unknown/documents');
+  assert.equal(res.status, 404);
+});
+
+test('GET /tenants/:id/documents returns an empty list for a tenant with no uploads', async () => {
+  const { app } = makeApp();
+  await request(app).post('/tenants').send({ id: 't1', name: 'A', systemPrompt: 'p' });
+  const res = await request(app).get('/tenants/t1/documents');
+  assert.equal(res.status, 200);
+  assert.deepEqual(res.body, []);
+});
+
+test('DELETE /tenants/:id/documents/:docId removes it from the vector store and the list', async () => {
+  const { app, vectorStore } = makeApp();
+  await request(app).post('/tenants').send({ id: 't1', name: 'A', systemPrompt: 'p' });
+  const uploadRes = await request(app)
+    .post('/tenants/t1/documents')
+    .attach('file', Buffer.from('## Menu\nPho bo - 65000\n'), 'menu.md');
+  const docId = uploadRes.body.docId;
+
+  const deleteRes = await request(app).delete(`/tenants/t1/documents/${docId}`);
+
+  assert.equal(deleteRes.status, 204);
+  const listRes = await request(app).get('/tenants/t1/documents');
+  assert.deepEqual(listRes.body, []);
+  assert.deepEqual(vectorStore.deletedDocuments, [{ tenantId: 't1', docId }]);
+});
+
+test('DELETE /tenants/:id/documents/:docId returns 404 for an unknown tenant', async () => {
+  const { app } = makeApp();
+  const res = await request(app).delete('/tenants/unknown/documents/some-doc');
+  assert.equal(res.status, 404);
+});
+
+test('DELETE /tenants/:id/documents/:docId returns 404 for a document that does not belong to that tenant', async () => {
+  const { app } = makeApp();
+  await request(app).post('/tenants').send({ id: 't1', name: 'A', systemPrompt: 'p' });
+  await request(app).post('/tenants').send({ id: 't2', name: 'B', systemPrompt: 'p' });
+  const uploadRes = await request(app)
+    .post('/tenants/t1/documents')
+    .attach('file', Buffer.from('content'), 'a.md');
+
+  const res = await request(app).delete(`/tenants/t2/documents/${uploadRes.body.docId}`);
+
   assert.equal(res.status, 404);
 });
 

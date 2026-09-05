@@ -83,7 +83,32 @@ function createApp({ tenantStore, vectorStore, embeddingClient, ragService, llmC
         req.params.id,
         chunks.map((text, i) => ({ text, embedding: embeddings[i], docId }))
       );
+      tenantStore.addDocument({ id: docId, tenantId: req.params.id, filename: req.file.originalname, chunkCount: chunks.length });
       res.status(201).json({ docId, chunkCount: chunks.length });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  app.get('/tenants/:id/documents', (req, res) => {
+    const tenant = tenantStore.getTenant(req.params.id);
+    if (!tenant) return res.status(404).json({ error: 'tenant not found' });
+    res.json(tenantStore.listDocuments(req.params.id));
+  });
+
+  app.delete('/tenants/:id/documents/:docId', async (req, res, next) => {
+    try {
+      const tenant = tenantStore.getTenant(req.params.id);
+      if (!tenant) return res.status(404).json({ error: 'tenant not found' });
+
+      const doc = tenantStore.getDocument(req.params.docId);
+      if (!doc || doc.tenantId !== req.params.id) {
+        return res.status(404).json({ error: 'document not found' });
+      }
+
+      await vectorStore.deleteDocument(req.params.id, req.params.docId);
+      tenantStore.deleteDocument(req.params.docId);
+      res.status(204).end();
     } catch (err) {
       next(err);
     }
