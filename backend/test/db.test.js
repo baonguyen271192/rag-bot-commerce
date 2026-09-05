@@ -64,3 +64,55 @@ test('messages are isolated per conversation', () => {
   assert.deepEqual(c1, [{ role: 'user', text: 'from c1' }]);
   store.close();
 });
+
+test('adds and lists documents for a tenant, oldest first', () => {
+  const store = new TenantStore(':memory:');
+  store.createTenant({ id: 't1', name: 'A', systemPrompt: 'p' });
+  store.addDocument({ id: 'menu.md_1', tenantId: 't1', filename: 'menu.md', chunkCount: 3 });
+  store.addDocument({ id: 'info.md_2', tenantId: 't1', filename: 'info.md', chunkCount: 1 });
+
+  const docs = store.listDocuments('t1');
+
+  assert.equal(docs.length, 2);
+  assert.deepEqual(docs.map((d) => d.id), ['menu.md_1', 'info.md_2']);
+  assert.equal(docs[0].filename, 'menu.md');
+  assert.equal(docs[0].chunkCount, 3);
+  assert.ok(docs[0].createdAt);
+  store.close();
+});
+
+test('listDocuments only returns documents for the requested tenant', () => {
+  const store = new TenantStore(':memory:');
+  store.createTenant({ id: 't1', name: 'A', systemPrompt: 'p' });
+  store.createTenant({ id: 't2', name: 'B', systemPrompt: 'p' });
+  store.addDocument({ id: 'doc1', tenantId: 't1', filename: 'a.md', chunkCount: 1 });
+  store.addDocument({ id: 'doc2', tenantId: 't2', filename: 'b.md', chunkCount: 1 });
+
+  assert.deepEqual(store.listDocuments('t1').map((d) => d.id), ['doc1']);
+  assert.deepEqual(store.listDocuments('t2').map((d) => d.id), ['doc2']);
+  store.close();
+});
+
+test('getDocument returns the document with its tenantId, or null if missing', () => {
+  const store = new TenantStore(':memory:');
+  store.createTenant({ id: 't1', name: 'A', systemPrompt: 'p' });
+  store.addDocument({ id: 'doc1', tenantId: 't1', filename: 'a.md', chunkCount: 2 });
+
+  const doc = store.getDocument('doc1');
+  assert.equal(doc.tenantId, 't1');
+  assert.equal(doc.filename, 'a.md');
+  assert.equal(store.getDocument('missing'), null);
+  store.close();
+});
+
+test('deleteDocument removes the document row', () => {
+  const store = new TenantStore(':memory:');
+  store.createTenant({ id: 't1', name: 'A', systemPrompt: 'p' });
+  store.addDocument({ id: 'doc1', tenantId: 't1', filename: 'a.md', chunkCount: 1 });
+
+  store.deleteDocument('doc1');
+
+  assert.equal(store.getDocument('doc1'), null);
+  assert.deepEqual(store.listDocuments('t1'), []);
+  store.close();
+});

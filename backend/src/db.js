@@ -22,6 +22,15 @@ class TenantStore {
       );
       CREATE INDEX IF NOT EXISTS idx_messages_conv
         ON messages (tenant_id, conversation_id, id);
+      CREATE TABLE IF NOT EXISTS documents (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        filename TEXT NOT NULL,
+        chunk_count INTEGER NOT NULL,
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_documents_tenant
+        ON documents (tenant_id, created_at);
     `);
   }
 
@@ -63,6 +72,40 @@ class TenantStore {
       )
       .all(tenantId, conversationId, limit);
     return rows.reverse();
+  }
+
+  addDocument({ id, tenantId, filename, chunkCount }) {
+    this.db
+      .prepare('INSERT INTO documents (id, tenant_id, filename, chunk_count, created_at) VALUES (?, ?, ?, ?, ?)')
+      .run(id, tenantId, filename, chunkCount, new Date().toISOString());
+  }
+
+  listDocuments(tenantId) {
+    const rows = this.db
+      .prepare('SELECT * FROM documents WHERE tenant_id = ? ORDER BY created_at ASC')
+      .all(tenantId);
+    return rows.map((row) => ({
+      id: row.id,
+      filename: row.filename,
+      chunkCount: row.chunk_count,
+      createdAt: row.created_at,
+    }));
+  }
+
+  getDocument(id) {
+    const row = this.db.prepare('SELECT * FROM documents WHERE id = ?').get(id);
+    if (!row) return null;
+    return {
+      id: row.id,
+      tenantId: row.tenant_id,
+      filename: row.filename,
+      chunkCount: row.chunk_count,
+      createdAt: row.created_at,
+    };
+  }
+
+  deleteDocument(id) {
+    this.db.prepare('DELETE FROM documents WHERE id = ?').run(id);
   }
 
   close() {
