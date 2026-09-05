@@ -1,0 +1,36 @@
+'use strict';
+
+const path = require('node:path');
+const { ThreadType } = require('zca-js');
+const { startTenantSession } = require('./tenant-session');
+
+async function startAllTenantSessions({
+  backendClient,
+  dataDir,
+  statusRegistry,
+  logger = console,
+  startTenantSessionImpl = startTenantSession,
+}) {
+  const tenants = await backendClient.listTenants();
+
+  await Promise.all(
+    tenants.map(async (tenant) => {
+      try {
+        await startTenantSessionImpl({
+          tenantId: tenant.id,
+          backendClient,
+          credentialsPath: path.join(dataDir, tenant.id, 'credentials.json'),
+          qrPath: path.join(dataDir, tenant.id, 'qr.png'),
+          onStatusChange: (status) => statusRegistry.set(tenant.id, status),
+          ThreadType,
+          logger,
+        });
+      } catch (err) {
+        logger.error(`bridge: tenant ${tenant.id} failed to start`, err);
+        statusRegistry.set(tenant.id, { status: 'error', error: err.message });
+      }
+    })
+  );
+}
+
+module.exports = { startAllTenantSessions };
