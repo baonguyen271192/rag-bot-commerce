@@ -74,3 +74,9 @@ test('GET /tenants/:id/qr.png returns 404 when no QR file exists yet', async () 
   const res = await request(app).get('/tenants/t1/qr.png');
   assert.equal(res.status, 404);
 });
+
+test('GET /tenants/:id/qr.png rejects a path-traversal id before touching the filesystem', async () => {
+  const app = createStatusServer({ statusRegistry: new Map(), dataDir: makeDataDir() });
+  const res = await request(app).get('/tenants/..%2f..%2f..%2fetc/qr.png');
+  assert.equal(res.status, 400);
+});

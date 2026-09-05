@@ -22,6 +22,9 @@ function createStatusServer({ statusRegistry, dataDir }) {
   });
 
   app.get('/tenants/:id/qr.png', (req, res) => {
+    if (!/^[a-z0-9-]+$/.test(req.params.id)) {
+      return res.status(400).json({ error: 'invalid tenant id' });
+    }
     const qrPath = path.join(dataDir, req.params.id, 'qr.png');
     if (!fs.existsSync(qrPath)) return res.status(404).json({ error: 'no qr code available' });
     res.sendFile(qrPath);
