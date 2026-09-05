@@ -116,6 +116,31 @@ test('startTenantSession does not crash the process when the listener callback t
   await handlers.message({ type: ThreadType.User, data: { content: 'hi', uidFrom: 'user-1' }, threadId: 'user-1' });
 });
 
+test('startTenantSession catches a synchronous throw in message filtering and does not crash', async () => {
+  const { api, handlers } = makeFakeApi();
+  const backendClient = { ask: async () => 'unused' };
+  const logged = [];
+
+  await startTenantSession({
+    tenantId: 't1',
+    backendClient,
+    credentialsPath: '/tmp/unused-creds.json',
+    qrPath: '/tmp/unused-qr.png',
+    onStatusChange: () => {},
+    createZaloApiImpl: async () => api,
+    ThreadType,
+    logger: { info: () => {}, error: (...args) => logged.push(args) },
+  });
+
+  // message.data is missing entirely, so shouldHandleMessage's `message.data.content`
+  // throws a TypeError synchronously inside the listener callback. Unlike the ask()-throws
+  // test above, nothing in message-handler.js catches this — only tenant-session.js's own
+  // outer try/catch can. This is the test that actually exercises that catch.
+  await handlers.message({ type: ThreadType.User, threadId: 'user-1' });
+
+  assert.ok(logged.length > 0);
+});
+
 test('startTenantSession reports status error when the Zalo session closes unexpectedly', async () => {
   const { api, handlers } = makeFakeApi();
   const statusUpdates = [];
