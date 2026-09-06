@@ -2,6 +2,9 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { ClientsContext } from './clients-context';
 import { createBackendClient } from './api/backend';
 import { createBridgeClient } from './api/bridge';
+import TenantListPage from './pages/TenantListPage';
+import CreateTenantPage from './pages/CreateTenantPage';
+import TenantDetailPage from './pages/TenantDetailPage';
 
 const backendClient = createBackendClient({
   baseUrl: import.meta.env.VITE_BACKEND_URL || 'http://localhost:4001',
@@ -15,9 +18,9 @@ export default function App() {
     <ClientsContext.Provider value={{ backendClient, bridgeClient }}>
       <BrowserRouter>
         <Routes>
-          <Route path="/" element={<div className="p-8">Danh sách tenant (đang xây dựng)</div>} />
-          <Route path="/tenants/new" element={<div className="p-8">Tạo tenant (đang xây dựng)</div>} />
-          <Route path="/tenants/:id" element={<div className="p-8">Chi tiết tenant (đang xây dựng)</div>} />
+          <Route path="/" element={<TenantListPage />} />
+          <Route path="/tenants/new" element={<CreateTenantPage />} />
+          <Route path="/tenants/:id" element={<TenantDetailPage />} />
         </Routes>
       </BrowserRouter>
     </ClientsContext.Provider>
