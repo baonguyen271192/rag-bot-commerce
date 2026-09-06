@@ -49,6 +49,12 @@ test('updateSystemPrompt PUTs the new prompt', async () => {
   });
 });
 
+test('updateSystemPrompt throws the backend error message on failure', async () => {
+  const fetchImpl = vi.fn().mockResolvedValue({ ok: false, status: 404, json: async () => ({ error: 'tenant not found' }) });
+  const client = createBackendClient({ baseUrl: 'http://x', fetchImpl });
+  await expect(client.updateSystemPrompt('missing', 'p')).rejects.toThrow('tenant not found');
+});
+
 test('listDocuments GETs /tenants/:id/documents', async () => {
   const fetchImpl = fetchOk([{ id: 'd1' }]);
   const client = createBackendClient({ baseUrl: 'http://x', fetchImpl });

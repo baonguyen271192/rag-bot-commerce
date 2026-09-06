@@ -31,8 +31,9 @@ export function createBackendClient({ baseUrl, fetchImpl = fetch } = {}) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ systemPrompt }),
       });
-      if (!res.ok) throw new Error(`updateSystemPrompt failed with status ${res.status}`);
-      return res.json();
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `updateSystemPrompt failed with status ${res.status}`);
+      return data;
     },
 
     async listDocuments(tenantId) {

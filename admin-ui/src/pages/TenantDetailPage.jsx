@@ -15,6 +15,7 @@ export default function TenantDetailPage() {
   const [systemPrompt, setSystemPrompt] = useState('');
   const [savingPrompt, setSavingPrompt] = useState(false);
   const [promptSaved, setPromptSaved] = useState(false);
+  const [promptError, setPromptError] = useState(null);
 
   const [documents, setDocuments] = useState([]);
   const [uploadError, setUploadError] = useState(null);
@@ -74,9 +75,12 @@ export default function TenantDetailPage() {
     e.preventDefault();
     setSavingPrompt(true);
     setPromptSaved(false);
+    setPromptError(null);
     try {
       await backendClient.updateSystemPrompt(id, systemPrompt);
       setPromptSaved(true);
+    } catch (err) {
+      setPromptError(err.message);
     } finally {
       setSavingPrompt(false);
     }
@@ -102,8 +106,12 @@ export default function TenantDetailPage() {
 
   async function handleDelete(docId) {
     if (!window.confirm('Xoá tài liệu này?')) return;
-    await backendClient.deleteDocument(id, docId);
-    loadDocuments();
+    try {
+      await backendClient.deleteDocument(id, docId);
+      loadDocuments();
+    } catch (err) {
+      setUploadError(err.message);
+    }
   }
 
   function handleDrop(e) {
@@ -166,6 +174,7 @@ export default function TenantDetailPage() {
             onChange={(e) => {
               setSystemPrompt(e.target.value);
               setPromptSaved(false);
+              setPromptError(null);
             }}
             rows={4}
             className="w-full rounded-lg border border-gray-300 px-3 py-2 text-base focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/30"
@@ -179,6 +188,7 @@ export default function TenantDetailPage() {
               {savingPrompt ? 'Đang lưu...' : 'Lưu'}
             </button>
             {promptSaved && <span className="text-sm text-accent">Đã lưu.</span>}
+            {promptError && <span className="text-sm text-danger">{promptError}</span>}
           </div>
         </form>
       </section>

@@ -66,6 +66,19 @@ test('saves the system prompt', async () => {
   expect(await screen.findByText('Đã lưu.')).toBeInTheDocument();
 });
 
+test('shows an error when saving the system prompt fails', async () => {
+  const user = userEvent.setup();
+  const backendClient = makeBackendClient({
+    updateSystemPrompt: vi.fn().mockRejectedValue(new Error('tenant not found')),
+  });
+  renderPage(backendClient, makeBridgeClient());
+
+  await screen.findByText('Truc Lam Vien');
+  await user.click(screen.getByRole('button', { name: 'Lưu' }));
+
+  expect(await screen.findByText('tenant not found')).toBeInTheDocument();
+});
+
 test('uploads a file selected via the file input and refreshes the document list', async () => {
   const listDocuments = vi
     .fn()
@@ -128,6 +141,24 @@ test('does not delete a document when the confirmation is cancelled', async () =
   await user.click(screen.getByRole('button', { name: 'Xoá' }));
 
   expect(backendClient.deleteDocument).not.toHaveBeenCalled();
+  window.confirm.mockRestore();
+});
+
+test('shows an error when deleting a document fails', async () => {
+  const user = userEvent.setup();
+  vi.spyOn(window, 'confirm').mockReturnValue(true);
+  const backendClient = makeBackendClient({
+    listDocuments: vi
+      .fn()
+      .mockResolvedValue([{ id: 'd1', filename: 'menu.md', chunkCount: 2, createdAt: '2026-01-01' }]),
+    deleteDocument: vi.fn().mockRejectedValue(new Error('delete failed')),
+  });
+  renderPage(backendClient, makeBridgeClient());
+
+  await screen.findByText(/menu\.md/);
+  await user.click(screen.getByRole('button', { name: 'Xoá' }));
+
+  expect(await screen.findByText('delete failed')).toBeInTheDocument();
   window.confirm.mockRestore();
 });
 
