@@ -188,6 +188,9 @@ export default function TenantDetailPage() {
           Tài liệu
         </h2>
         <div
+          role="button"
+          tabIndex={0}
+          aria-label="Chọn hoặc kéo-thả file tài liệu để upload"
           onDragOver={(e) => {
             e.preventDefault();
             setDragActive(true);
@@ -195,11 +198,17 @@ export default function TenantDetailPage() {
           onDragLeave={() => setDragActive(false)}
           onDrop={handleDrop}
           onClick={() => fileInputRef.current?.click()}
-          className={`mb-4 flex cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed p-8 text-center transition-colors ${
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              fileInputRef.current?.click();
+            }
+          }}
+          className={`mb-4 flex cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed p-8 text-center transition-colors focus:outline-none focus:ring-2 focus:ring-primary/30 ${
             dragActive ? 'border-primary bg-primary/5' : 'border-gray-300'
           }`}
         >
-          <p className="text-gray-600">Kéo-thả file vào đây, hoặc bấm để chọn (.md, .txt, .jpg, .png)</p>
+          <p className="text-gray-600">Kéo-thả file vào đây, hoặc bấm để chọn (.md, .txt, .jpg, .jpeg, .png)</p>
           <input
             ref={fileInputRef}
             type="file"

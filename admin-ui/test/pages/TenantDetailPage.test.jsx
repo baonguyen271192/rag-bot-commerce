@@ -148,3 +148,18 @@ test('shows a message explaining the bridge does not know about this tenant yet'
 
   expect(await screen.findByText(/Chưa kết nối với bridge/)).toBeInTheDocument();
 });
+
+test('the upload drop zone is keyboard-operable (Enter opens the file picker)', async () => {
+  const backendClient = makeBackendClient();
+  renderPage(backendClient, makeBridgeClient());
+
+  await screen.findByText('Truc Lam Vien');
+  const clickSpy = vi.spyOn(HTMLInputElement.prototype, 'click').mockImplementation(() => {});
+  const dropZone = screen.getByRole('button', { name: 'Chọn hoặc kéo-thả file tài liệu để upload' });
+
+  dropZone.focus();
+  fireEvent.keyDown(dropZone, { key: 'Enter' });
+
+  expect(clickSpy).toHaveBeenCalled();
+  clickSpy.mockRestore();
+});
