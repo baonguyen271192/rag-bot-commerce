@@ -185,6 +185,48 @@ test('answer skips a match whose document was deleted after indexing, without fa
   assert.deepEqual(attachments, []);
 });
 
+test('answer returns no attachments for a vague/off-topic message whose nearest matches are all weak (real calibrated scores)', async () => {
+  const fakes = makeFakes({
+    tenant: { id: 't1', systemPrompt: 'p' },
+    // Real distances observed for the message "Ngon" against this tenant's actual
+    // vector store -- vector search always returns its k nearest rows even when
+    // nothing is truly relevant, so without a distance cutoff this would attach a
+    // page image to a one-word "delicious" comment.
+    searchResults: [
+      { text: 'try\t\ntry\t\ntry\n65.000\nRice bowl cake with...', score: 0.8693, docId: 'menu.pdf_1', page: 2 },
+      { text: 'Gio mo cua: 7h-21h30', score: 0.9072, docId: 'info.md_1', page: 0 },
+      { text: '125.000\nRoasted Chicken rice...', score: 0.9142, docId: 'menu.pdf_1', page: 5 },
+    ],
+    llmReply: 'Da, minh cam on anh/chi nhieu a!',
+    documents: {
+      'menu.pdf_1': { id: 'menu.pdf_1', mimetype: 'application/pdf' },
+      'info.md_1': { id: 'info.md_1', mimetype: 'text/markdown' },
+    },
+  });
+  const rag = new RagService(fakes);
+
+  const { attachments } = await rag.answer({ tenantId: 't1', conversationId: 'c1', text: 'Ngon' });
+
+  assert.deepEqual(attachments, []);
+});
+
+test('answer excludes a weak match but keeps a strong one, when a question mixes both', async () => {
+  const fakes = makeFakes({
+    tenant: { id: 't1', systemPrompt: 'p' },
+    searchResults: [
+      { text: 'Com nieu - 20000', score: 0.61, docId: 'menu.pdf_1', page: 3 },
+      { text: 'unrelated weak match', score: 0.9, docId: 'menu.pdf_1', page: 7 },
+    ],
+    llmReply: 'Com nieu gia 20.000d',
+    documents: { 'menu.pdf_1': { id: 'menu.pdf_1', mimetype: 'application/pdf' } },
+  });
+  const rag = new RagService(fakes);
+
+  const { attachments } = await rag.answer({ tenantId: 't1', conversationId: 'c1', text: 'com nieu gia bao nhieu' });
+
+  assert.deepEqual(attachments, [{ docId: 'menu.pdf_1', page: 3, mimetype: 'image/png' }]);
+});
+
 test('answer includes one attachment per distinct page across all retrieved matches, for a broad question', async () => {
   const fakes = makeFakes({
     tenant: { id: 't1', systemPrompt: 'p' },
