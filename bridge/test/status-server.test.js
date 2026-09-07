@@ -53,14 +53,34 @@ test('GET /tenants/:id/qr-status returns just the status when logged in', async 
   assert.deepEqual(res.body, { status: 'logged_in' });
 });
 
-test('GET /tenants/:id/qr-status returns a qrUrl when awaiting a scan', async () => {
-  const statusRegistry = new Map([['t1', { status: 'awaiting_qr', qrPath: '/data/t1/qr.png' }]]);
-  const app = createStatusServer({ statusRegistry, dataDir: makeDataDir() });
+test('GET /tenants/:id/qr-status returns a qrUrl and the qr file\'s version when awaiting a scan', async () => {
+  const dataDir = makeDataDir();
+  const qrPath = path.join(dataDir, 't1', 'qr.png');
+  fs.mkdirSync(path.dirname(qrPath), { recursive: true });
+  fs.writeFileSync(qrPath, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+  const statusRegistry = new Map([['t1', { status: 'awaiting_qr', qrPath }]]);
+  const app = createStatusServer({ statusRegistry, dataDir });
 
   const res = await request(app).get('/tenants/t1/qr-status');
 
   assert.equal(res.status, 200);
-  assert.deepEqual(res.body, { status: 'awaiting_qr', qrUrl: '/tenants/t1/qr.png' });
+  assert.equal(res.body.status, 'awaiting_qr');
+  assert.equal(res.body.qrUrl, '/tenants/t1/qr.png');
+  assert.equal(typeof res.body.qrVersion, 'number');
+});
+
+test('GET /tenants/:id/qr-status returns the same qrVersion across repeated polls when the qr file has not changed', async () => {
+  const dataDir = makeDataDir();
+  const qrPath = path.join(dataDir, 't1', 'qr.png');
+  fs.mkdirSync(path.dirname(qrPath), { recursive: true });
+  fs.writeFileSync(qrPath, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+  const statusRegistry = new Map([['t1', { status: 'awaiting_qr', qrPath }]]);
+  const app = createStatusServer({ statusRegistry, dataDir });
+
+  const first = await request(app).get('/tenants/t1/qr-status');
+  const second = await request(app).get('/tenants/t1/qr-status');
+
+  assert.equal(first.body.qrVersion, second.body.qrVersion);
 });
 
 test('GET /tenants/:id/qr-status includes the real error reason for an error status', async () => {

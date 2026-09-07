@@ -18,7 +18,17 @@ function createStatusServer({ statusRegistry, dataDir, sessionHandles }) {
     const status = statusRegistry.get(req.params.id);
     if (!status) return res.status(404).json({ error: 'tenant not found' });
     if (status.status === 'awaiting_qr' && status.qrPath) {
-      return res.json({ status: status.status, qrUrl: `/tenants/${req.params.id}/qr.png` });
+      // qrVersion is the QR file's own last-modified time, not Date.now() -- it only
+      // changes when bridge actually writes a new QR code (initial generation, or a
+      // regeneration after expiry), so the admin-ui only reloads the image then, not on
+      // every 3s status poll.
+      let qrVersion = null;
+      try {
+        qrVersion = fs.statSync(status.qrPath).mtimeMs;
+      } catch {
+        // file briefly missing between statusRegistry update and disk write -- next poll picks it up
+      }
+      return res.json({ status: status.status, qrUrl: `/tenants/${req.params.id}/qr.png`, qrVersion });
     }
     if (status.status === 'error') {
       return res.json({ status: status.status, error: status.error });

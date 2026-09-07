@@ -177,12 +177,49 @@ test('shows an error when deleting a document fails', async () => {
 test('shows the QR image when the tenant is awaiting a scan', async () => {
   const backendClient = makeBackendClient();
   const bridgeClient = makeBridgeClient({
-    getQrStatus: vi.fn().mockResolvedValue({ status: 'awaiting_qr', qrUrl: '/tenants/t1/qr.png' }),
+    getQrStatus: vi.fn().mockResolvedValue({ status: 'awaiting_qr', qrUrl: '/tenants/t1/qr.png', qrVersion: 111 }),
   });
   renderPage(backendClient, bridgeClient);
 
   const img = await screen.findByAltText('QR đăng nhập Zalo');
   expect(img.src).toContain('http://bridge.local/tenants/t1/qr.png');
+});
+
+test('does not reload the QR image on every status poll when qrVersion is unchanged', async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  const backendClient = makeBackendClient();
+  const getQrStatus = vi.fn().mockResolvedValue({ status: 'awaiting_qr', qrUrl: '/tenants/t1/qr.png', qrVersion: 111 });
+  const bridgeClient = makeBridgeClient({ getQrStatus });
+  renderPage(backendClient, bridgeClient);
+
+  const img = await screen.findByAltText('QR đăng nhập Zalo');
+  const srcAfterFirstLoad = img.src;
+
+  await vi.advanceTimersByTimeAsync(3000);
+  await vi.advanceTimersByTimeAsync(3000);
+
+  expect(getQrStatus.mock.calls.length).toBeGreaterThanOrEqual(3);
+  expect(img.src).toBe(srcAfterFirstLoad);
+  vi.useRealTimers();
+});
+
+test('reloads the QR image once qrVersion changes (a real regeneration after expiry)', async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  const backendClient = makeBackendClient();
+  const getQrStatus = vi
+    .fn()
+    .mockResolvedValueOnce({ status: 'awaiting_qr', qrUrl: '/tenants/t1/qr.png', qrVersion: 111 })
+    .mockResolvedValue({ status: 'awaiting_qr', qrUrl: '/tenants/t1/qr.png', qrVersion: 222 });
+  const bridgeClient = makeBridgeClient({ getQrStatus });
+  renderPage(backendClient, bridgeClient);
+
+  const img = await screen.findByAltText('QR đăng nhập Zalo');
+  const srcBeforeRegeneration = img.src;
+
+  await vi.advanceTimersByTimeAsync(3000);
+  await waitFor(() => expect(img.src).not.toBe(srcBeforeRegeneration));
+  expect(img.src).toContain('v=222');
+  vi.useRealTimers();
 });
 
 test('logs out after confirming, when the tenant is logged in', async () => {

@@ -172,7 +172,7 @@ export default function TenantDetailPage() {
           <div>
             <p className="mb-3 text-gray-600">Quét mã QR này bằng tài khoản Zalo của nhà hàng:</p>
             <img
-              src={`${bridgeClient.baseUrl}${qrStatus.qrUrl}?t=${Date.now()}`}
+              src={`${bridgeClient.baseUrl}${qrStatus.qrUrl}${qrStatus.qrVersion ? `?v=${qrStatus.qrVersion}` : ''}`}
               alt="QR đăng nhập Zalo"
               className="h-48 w-48 rounded-lg border border-gray-200"
             />
