@@ -4,11 +4,13 @@ Multi-tenant RAG API: mỗi tenant (nhà hàng) có tài liệu và lịch sử 
 
 ## Biến môi trường bắt buộc
 
-- `OPENAI_API_KEY` — dùng để tạo embedding (`text-embedding-3-small`).
 - `OPENROUTER_API_KEY` — dùng để gọi LLM trả lời.
+- `OPENAI_API_KEY` — bắt buộc nếu `EMBEDDING_PROVIDER=openai` (mặc định). Dùng để tạo embedding (`text-embedding-3-small`).
+- `GEMINI_API_KEY` — bắt buộc nếu `EMBEDDING_PROVIDER=gemini`. Dùng để tạo embedding (`gemini-embedding-001`).
 
 ## Biến môi trường tuỳ chọn
 
+- `EMBEDDING_PROVIDER` — `openai` (mặc định) hoặc `gemini`. Chọn nhà cung cấp embedding — đổi qua lại chỉ cần đổi biến này, không cần sửa code. Gemini có gói miễn phí không cần thẻ, phù hợp giai đoạn test; OpenAI cần tài khoản có nạp tiền (tối thiểu $5).
 - `PORT` — mặc định `4001`.
 - `SQLITE_PATH` — mặc định `backend/data/tenants.db`.
 - `LANCE_PATH` — mặc định `backend/data/vectors`.
