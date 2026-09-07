@@ -96,3 +96,21 @@ test('GET /tenants/:id/qr.png rejects a path-traversal id before touching the fi
   const res = await request(app).get('/tenants/..%2f..%2f..%2fetc/qr.png');
   assert.equal(res.status, 400);
 });
+
+test('POST /tenants/:id/logout calls the tenant\'s logout handle', async () => {
+  let logoutCalls = 0;
+  const sessionHandles = new Map([['t1', { logout: () => { logoutCalls += 1; } }]]);
+  const app = createStatusServer({ statusRegistry: new Map(), dataDir: makeDataDir(), sessionHandles });
+
+  const res = await request(app).post('/tenants/t1/logout');
+
+  assert.equal(res.status, 200);
+  assert.deepEqual(res.body, { ok: true });
+  assert.equal(logoutCalls, 1);
+});
+
+test('POST /tenants/:id/logout returns 404 for a tenant with no active session', async () => {
+  const app = createStatusServer({ statusRegistry: new Map(), dataDir: makeDataDir(), sessionHandles: new Map() });
+  const res = await request(app).post('/tenants/unknown/logout');
+  assert.equal(res.status, 404);
+});

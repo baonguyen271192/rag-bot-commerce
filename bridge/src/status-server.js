@@ -5,7 +5,7 @@ const path = require('node:path');
 const express = require('express');
 const cors = require('cors');
 
-function createStatusServer({ statusRegistry, dataDir }) {
+function createStatusServer({ statusRegistry, dataDir, sessionHandles }) {
   const app = express();
   app.use(cors());
 
@@ -24,6 +24,13 @@ function createStatusServer({ statusRegistry, dataDir }) {
       return res.json({ status: status.status, error: status.error });
     }
     res.json({ status: status.status });
+  });
+
+  app.post('/tenants/:id/logout', (req, res) => {
+    const handle = sessionHandles && sessionHandles.get(req.params.id);
+    if (!handle) return res.status(404).json({ error: 'tenant not connected' });
+    handle.logout();
+    res.json({ ok: true });
   });
 
   app.get('/tenants/:id/qr.png', (req, res) => {

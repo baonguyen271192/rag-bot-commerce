@@ -93,3 +93,38 @@ test('starts all tenant sessions concurrently, not sequentially', async () => {
 
   assert.deepEqual(entered.sort(), ['t1', 't2']);
 });
+
+test('populates sessionHandles with each tenant\'s logout function', async () => {
+  const backendClient = { listTenants: async () => [{ id: 't1' }] };
+  const sessionHandles = new Map();
+  const logoutFn = () => {};
+
+  await startAllTenantSessions({
+    backendClient,
+    dataDir: '/tmp/bridge-data',
+    statusRegistry: new Map(),
+    sessionHandles,
+    logger: { info: () => {}, error: () => {} },
+    startTenantSessionImpl: async () => ({ api: {}, logout: logoutFn }),
+  });
+
+  assert.equal(sessionHandles.get('t1').logout, logoutFn);
+});
+
+test('does not fail when a tenant fails to start and never returns a logout handle', async () => {
+  const backendClient = { listTenants: async () => [{ id: 'broken' }] };
+  const sessionHandles = new Map();
+
+  await startAllTenantSessions({
+    backendClient,
+    dataDir: '/tmp/bridge-data',
+    statusRegistry: new Map(),
+    sessionHandles,
+    logger: { info: () => {}, error: () => {} },
+    startTenantSessionImpl: async () => {
+      throw new Error('login declined');
+    },
+  });
+
+  assert.equal(sessionHandles.has('broken'), false);
+});

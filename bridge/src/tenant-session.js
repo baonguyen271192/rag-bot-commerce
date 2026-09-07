@@ -1,5 +1,6 @@
 'use strict';
 
+const fs = require('node:fs');
 const { createZaloApi } = require('./zalo-session');
 const { shouldHandleMessage, extractMessageContent, handleIncomingMessage } = require('./message-handler');
 
@@ -16,6 +17,34 @@ async function startTenantSession({
   const api = await createZaloApiImpl({ credentialsPath, qrPath, logger, onStatusChange });
   const ownUid = api.getOwnId();
   onStatusChange({ status: 'logged_in' });
+
+  // Shared by the unexpected-close handler and the operator-triggered logout() below, so
+  // whichever one fires first "wins" and the other becomes a no-op -- without this, a
+  // manual logout that also happens to trigger the underlying listener's own 'closed'
+  // event would otherwise restart the session twice.
+  let restarted = false;
+  function restartSession() {
+    if (restarted) return;
+    restarted = true;
+    try {
+      fs.unlinkSync(credentialsPath);
+    } catch {
+      // no saved credentials file to remove -- nothing to do
+    }
+    startTenantSession({
+      tenantId,
+      backendClient,
+      credentialsPath,
+      qrPath,
+      onStatusChange,
+      ThreadType,
+      logger,
+      createZaloApiImpl,
+    }).catch((err) => {
+      logger.error(`bridge: failed to restart session for tenant ${tenantId}`, err);
+      onStatusChange({ status: 'error', error: err.message });
+    });
+  }
 
   api.listener.on('message', async (message) => {
     try {
@@ -43,11 +72,27 @@ async function startTenantSession({
   api.listener.on('closed', (code, reason) => {
     logger.error(`bridge: session closed for tenant ${tenantId}`, { code, reason });
     onStatusChange({ status: 'error', error: reason || 'session closed' });
+    // The saved credentials are what caused createZaloApiImpl to skip the QR flow last
+    // time; they're now stale (that's why the session just closed), so restarting removes
+    // them and falls back into the QR flow, showing a fresh QR without a manual bridge
+    // restart.
+    restartSession();
   });
 
   api.listener.start();
   logger.info(`bridge: tenant ${tenantId} listening for messages`);
-  return api;
+
+  function logout() {
+    logger.info(`bridge: logging out tenant ${tenantId} by operator request`);
+    api.listener.stop();
+    // restartSession() itself removes the stale credentials and re-enters the QR flow,
+    // which calls onStatusChange({status:'awaiting_qr'}) once it gets there -- no need to
+    // set status here too. The `restarted` guard inside restartSession() means it's safe
+    // to call this even if stop() happens to also trigger the 'closed' listener above.
+    restartSession();
+  }
+
+  return { api, logout };
 }
 
 module.exports = { startTenantSession };

@@ -2,6 +2,9 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 const { startTenantSession } = require('../src/tenant-session');
 
 const ThreadType = { User: 0, Group: 1 };
@@ -19,6 +22,7 @@ function makeFakeApi({ ownUid = 'bot-uid' } = {}) {
         handlers[event] = cb;
       },
       start: () => {},
+      stop: () => {},
     },
   };
   return { api, handlers, sentMessages };
@@ -163,4 +167,95 @@ test('startTenantSession reports status error when the Zalo session closes unexp
     status: 'error',
     error: 'kicked from another device',
   });
+});
+
+test('startTenantSession removes stale credentials and restarts the login flow after the session closes', async () => {
+  const credentialsPath = path.join(os.tmpdir(), `bridge-test-creds-${Date.now()}-${Math.random()}.json`);
+  fs.writeFileSync(credentialsPath, '{"stale":true}');
+  const { api, handlers } = makeFakeApi();
+  const statusUpdates = [];
+  const backendClient = { ask: async () => 'unused' };
+  let createCalls = 0;
+
+  await startTenantSession({
+    tenantId: 't1',
+    backendClient,
+    credentialsPath,
+    qrPath: '/tmp/unused-qr.png',
+    onStatusChange: (status) => statusUpdates.push(status),
+    createZaloApiImpl: async () => {
+      createCalls += 1;
+      return api;
+    },
+    ThreadType,
+    logger: { info: () => {}, error: () => {} },
+  });
+
+  handlers.closed(3003, 'KICKOUT_BY_WORKER');
+  // Flush the recursive restart's pending microtasks (its own `await createZaloApiImpl(...)`).
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(createCalls, 2, 'createZaloApiImpl should be called again to restart the login flow');
+  assert.equal(fs.existsSync(credentialsPath), false, 'the stale credentials file should be removed');
+  assert.ok(
+    statusUpdates.some((s) => s.status === 'error' && s.error === 'KICKOUT_BY_WORKER'),
+    'the close reason should still be reported before the restart'
+  );
+});
+
+test('startTenantSession does not throw when there are no credentials to remove on close', async () => {
+  const credentialsPath = path.join(os.tmpdir(), `bridge-test-creds-missing-${Date.now()}-${Math.random()}.json`);
+  const { api, handlers } = makeFakeApi();
+  const backendClient = { ask: async () => 'unused' };
+
+  await startTenantSession({
+    tenantId: 't1',
+    backendClient,
+    credentialsPath,
+    qrPath: '/tmp/unused-qr.png',
+    onStatusChange: () => {},
+    createZaloApiImpl: async () => api,
+    ThreadType,
+    logger: { info: () => {}, error: () => {} },
+  });
+
+  assert.doesNotThrow(() => handlers.closed(3003, 'kicked from another device'));
+});
+
+test('logout stops the listener, removes credentials, and restarts the login flow exactly once', async () => {
+  const credentialsPath = path.join(os.tmpdir(), `bridge-test-creds-logout-${Date.now()}-${Math.random()}.json`);
+  fs.writeFileSync(credentialsPath, '{"stale":true}');
+  const { api } = makeFakeApi();
+  let stopCalls = 0;
+  api.listener.stop = () => {
+    stopCalls += 1;
+  };
+  let createCalls = 0;
+
+  const { logout } = await startTenantSession({
+    tenantId: 't1',
+    backendClient: { ask: async () => 'unused' },
+    credentialsPath,
+    qrPath: '/tmp/unused-qr.png',
+    onStatusChange: () => {},
+    createZaloApiImpl: async () => {
+      createCalls += 1;
+      return api;
+    },
+    ThreadType,
+    logger: { info: () => {}, error: () => {} },
+  });
+
+  logout();
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(stopCalls, 1);
+  assert.equal(createCalls, 2, 'createZaloApiImpl should be called again to restart the login flow');
+  assert.equal(fs.existsSync(credentialsPath), false, 'the stale credentials file should be removed');
+
+  // Calling logout() again (or a stray 'closed' event firing after stop()) must not
+  // trigger a second restart.
+  logout();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(createCalls, 2, 'a second logout call must not restart the session again');
 });

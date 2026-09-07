@@ -16,13 +16,14 @@ async function main() {
 
   const backendClient = new BackendClient({ baseUrl: backendUrl });
   const statusRegistry = new Map();
+  const sessionHandles = new Map();
 
-  const statusApp = createStatusServer({ statusRegistry, dataDir });
+  const statusApp = createStatusServer({ statusRegistry, dataDir, sessionHandles });
   statusApp.listen(statusPort, () => {
     console.log(`bridge: status server listening on port ${statusPort}`);
   });
 
-  await startAllTenantSessions({ backendClient, dataDir, statusRegistry });
+  await startAllTenantSessions({ backendClient, dataDir, statusRegistry, sessionHandles });
   console.log('bridge: all tenant sessions started (see logs above for per-tenant status)');
 }
 

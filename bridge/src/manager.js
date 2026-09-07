@@ -8,6 +8,7 @@ async function startAllTenantSessions({
   backendClient,
   dataDir,
   statusRegistry,
+  sessionHandles,
   logger = console,
   startTenantSessionImpl = startTenantSession,
 }) {
@@ -16,7 +17,7 @@ async function startAllTenantSessions({
   await Promise.all(
     tenants.map(async (tenant) => {
       try {
-        await startTenantSessionImpl({
+        const result = await startTenantSessionImpl({
           tenantId: tenant.id,
           backendClient,
           credentialsPath: path.join(dataDir, tenant.id, 'credentials.json'),
@@ -25,6 +26,9 @@ async function startAllTenantSessions({
           ThreadType,
           logger,
         });
+        if (sessionHandles && result && result.logout) {
+          sessionHandles.set(tenant.id, { logout: result.logout });
+        }
       } catch (err) {
         logger.error(`bridge: tenant ${tenant.id} failed to start`, err);
         statusRegistry.set(tenant.id, { status: 'error', error: err.message });
