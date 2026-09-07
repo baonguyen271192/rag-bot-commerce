@@ -13,6 +13,7 @@ async function startTenantSession({
   ThreadType,
   logger = console,
   createZaloApiImpl = createZaloApi,
+  onSessionReady = () => {},
 }) {
   const api = await createZaloApiImpl({ credentialsPath, qrPath, logger, onStatusChange });
   const ownUid = api.getOwnId();
@@ -40,6 +41,7 @@ async function startTenantSession({
       ThreadType,
       logger,
       createZaloApiImpl,
+      onSessionReady,
     }).catch((err) => {
       logger.error(`bridge: failed to restart session for tenant ${tenantId}`, err);
       onStatusChange({ status: 'error', error: err.message });
@@ -91,6 +93,11 @@ async function startTenantSession({
     // to call this even if stop() happens to also trigger the 'closed' listener above.
     restartSession();
   }
+
+  // Fires on the initial start AND every restart, so whatever holds this handle (the
+  // status-server's logout route) always has the current session's logout, never a stale
+  // one from a session that already closed and got replaced.
+  onSessionReady({ api, logout });
 
   return { api, logout };
 }

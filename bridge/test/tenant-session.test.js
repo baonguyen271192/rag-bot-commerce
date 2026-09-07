@@ -259,3 +259,34 @@ test('logout stops the listener, removes credentials, and restarts the login flo
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(createCalls, 2, 'a second logout call must not restart the session again');
 });
+
+test('onSessionReady fires again with a fresh logout handle after a restart, not the stale one', async () => {
+  // Regression test: sessionHandles must not be left pointing at the first session's
+  // logout(), whose `restarted` guard is already tripped and would silently no-op on a
+  // second click of the operator's logout button.
+  const credentialsPath = path.join(os.tmpdir(), `bridge-test-creds-ready-${Date.now()}-${Math.random()}.json`);
+  const { api } = makeFakeApi();
+  const readyHandles = [];
+
+  await startTenantSession({
+    tenantId: 't1',
+    backendClient: { ask: async () => 'unused' },
+    credentialsPath,
+    qrPath: '/tmp/unused-qr.png',
+    onStatusChange: () => {},
+    createZaloApiImpl: async () => api,
+    ThreadType,
+    logger: { info: () => {}, error: () => {} },
+    onSessionReady: (handle) => readyHandles.push(handle),
+  });
+
+  assert.equal(readyHandles.length, 1, 'onSessionReady should fire on the initial start');
+  const [{ logout: firstLogout }] = readyHandles;
+
+  firstLogout();
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(readyHandles.length, 2, 'onSessionReady should fire again for the restarted session');
+  const secondLogout = readyHandles[1].logout;
+  assert.notEqual(secondLogout, firstLogout, 'the restarted session must hand out a new logout function');
+});

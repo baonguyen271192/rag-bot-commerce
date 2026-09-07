@@ -105,10 +105,33 @@ test('populates sessionHandles with each tenant\'s logout function', async () =>
     statusRegistry: new Map(),
     sessionHandles,
     logger: { info: () => {}, error: () => {} },
-    startTenantSessionImpl: async () => ({ api: {}, logout: logoutFn }),
+    startTenantSessionImpl: async (opts) => {
+      opts.onSessionReady({ api: {}, logout: logoutFn });
+    },
   });
 
   assert.equal(sessionHandles.get('t1').logout, logoutFn);
+});
+
+test('re-registers sessionHandles when onSessionReady fires again after a restart', async () => {
+  const backendClient = { listTenants: async () => [{ id: 't1' }] };
+  const sessionHandles = new Map();
+  const firstLogout = () => {};
+  const secondLogout = () => {};
+
+  await startAllTenantSessions({
+    backendClient,
+    dataDir: '/tmp/bridge-data',
+    statusRegistry: new Map(),
+    sessionHandles,
+    logger: { info: () => {}, error: () => {} },
+    startTenantSessionImpl: async (opts) => {
+      opts.onSessionReady({ api: {}, logout: firstLogout });
+      opts.onSessionReady({ api: {}, logout: secondLogout });
+    },
+  });
+
+  assert.equal(sessionHandles.get('t1').logout, secondLogout);
 });
 
 test('does not fail when a tenant fails to start and never returns a logout handle', async () => {
