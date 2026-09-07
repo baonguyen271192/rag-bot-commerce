@@ -66,7 +66,12 @@ async function processDocumentBuffer({
   }
 
   const chunks = chunkText(text);
-  const embeddings = await embeddingClient.embed(chunks);
+  let embeddings;
+  try {
+    embeddings = await embeddingClient.embed(chunks);
+  } catch (err) {
+    throw new DocumentProcessingError(502, `khong tao duoc embedding: ${err.message}`);
+  }
   await vectorStore.addChunks(
     tenantId,
     chunks.map((chunkContent, i) => ({ text: chunkContent, embedding: embeddings[i], docId }))
@@ -74,6 +79,8 @@ async function processDocumentBuffer({
   tenantStore.addDocument({ id: docId, tenantId, filename, chunkCount: chunks.length });
   return { docId, chunkCount: chunks.length };
 }
+
+const REJECTED_URL_CONTENT_TYPES = { 'text/html': true, 'application/json': true, 'application/xml': true };
 
 function filenameFromUrl(url, contentType) {
   try {
@@ -167,6 +174,11 @@ function createApp({ tenantStore, vectorStore, embeddingClient, ragService, llmC
       }
 
       const contentType = (fetchRes.headers.get('content-type') || '').split(';')[0].trim();
+      if (REJECTED_URL_CONTENT_TYPES[contentType]) {
+        return res.status(422).json({
+          error: `url tra ve mot trang web (${contentType}), khong phai file tai lieu. Link Google Drive dang xem truoc se khong hoat dong, can dung link tai truc tiep.`,
+        });
+      }
       const filename = filenameFromUrl(url, contentType);
 
       const result = await processDocumentBuffer({

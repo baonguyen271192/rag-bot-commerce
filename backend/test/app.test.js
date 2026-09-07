@@ -364,6 +364,47 @@ test('POST /tenants/:id/documents/from-url falls back to a generic filename when
   assert.equal(listRes.body[0].filename, 'document.txt');
 });
 
+test('POST /tenants/:id/documents/from-url rejects a url that returns an HTML page instead of a document', async () => {
+  const fetchImplOverride = async () => ({
+    ok: true,
+    status: 200,
+    headers: { get: () => 'text/html; charset=UTF-8' },
+    arrayBuffer: async () => new TextEncoder().encode('<html>not a document</html>').buffer,
+  });
+  const { app } = makeApp({ fetchImplOverride });
+  await request(app).post('/tenants').send({ id: 't1', name: 'A', systemPrompt: 'p' });
+
+  const res = await request(app)
+    .post('/tenants/t1/documents/from-url')
+    .send({ url: 'https://drive.google.com/drive/folders/abc' });
+
+  assert.equal(res.status, 422);
+  assert.match(res.body.error, /trang web/);
+});
+
+test('POST /tenants/:id/documents returns a clear 502 (not a generic 500) when the embedding call fails', async () => {
+  const embeddingClient = {
+    embed: async () => {
+      throw new Error('Gemini embeddings request failed with status 429: rate limited');
+    },
+  };
+  const tenantStore = new TenantStore(':memory:');
+  const vectorStore = { addChunks: async () => {}, search: async () => [] };
+  const llmClient = { complete: async () => 'ok' };
+  const { RagService } = require('../src/rag');
+  const ragService = new RagService({ tenantStore, vectorStore, embeddingClient, llmClient });
+  const app = createApp({ tenantStore, vectorStore, embeddingClient, ragService, llmClient });
+
+  await request(app).post('/tenants').send({ id: 't1', name: 'A', systemPrompt: 'p' });
+
+  const res = await request(app)
+    .post('/tenants/t1/documents')
+    .attach('file', Buffer.from('## Menu\nPho bo\n'), 'menu.md');
+
+  assert.equal(res.status, 502);
+  assert.match(res.body.error, /khong tao duoc embedding/);
+});
+
 test('POST /tenants/:id/ask returns the RAG reply', async () => {
   const { app } = makeApp({ llmReply: 'Chao ban, gio mo cua la 7h-21h30.' });
   await request(app).post('/tenants').send({ id: 't1', name: 'A', systemPrompt: 'p' });
