@@ -23,6 +23,8 @@ export default function TenantDetailPage() {
   const [dragActive, setDragActive] = useState(false);
 
   const [qrStatus, setQrStatus] = useState({ status: 'unknown' });
+  const [loggingOut, setLoggingOut] = useState(false);
+  const [logoutError, setLogoutError] = useState(null);
 
   const fileInputRef = useRef(null);
 
@@ -114,6 +116,19 @@ export default function TenantDetailPage() {
     }
   }
 
+  async function handleLogout() {
+    if (!window.confirm('Đăng xuất tài khoản Zalo đang kết nối? Sẽ cần quét QR mới để kết nối lại.')) return;
+    setLoggingOut(true);
+    setLogoutError(null);
+    try {
+      await bridgeClient.logout(id);
+    } catch (err) {
+      setLogoutError(err.message);
+    } finally {
+      setLoggingOut(false);
+    }
+  }
+
   function handleDrop(e) {
     e.preventDefault();
     setDragActive(false);
@@ -139,7 +154,20 @@ export default function TenantDetailPage() {
         <h2 id="qr-heading" className="mb-3 text-lg font-medium text-gray-900">
           Đăng nhập Zalo
         </h2>
-        {qrStatus.status === 'logged_in' && <p className="text-accent">Đã đăng nhập, bot đang hoạt động.</p>}
+        {qrStatus.status === 'logged_in' && (
+          <div className="flex items-center justify-between">
+            <p className="text-accent">Đã đăng nhập, bot đang hoạt động.</p>
+            <button
+              type="button"
+              onClick={handleLogout}
+              disabled={loggingOut}
+              className="cursor-pointer rounded-lg border border-danger px-3 py-1.5 text-sm font-medium text-danger hover:bg-danger/5 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {loggingOut ? 'Đang đăng xuất...' : 'Đăng xuất'}
+            </button>
+          </div>
+        )}
+        {logoutError && <p className="mt-2 text-sm text-danger">{logoutError}</p>}
         {qrStatus.status === 'awaiting_qr' && qrStatus.qrUrl && (
           <div>
             <p className="mb-3 text-gray-600">Quét mã QR này bằng tài khoản Zalo của nhà hàng:</p>

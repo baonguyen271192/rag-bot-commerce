@@ -173,6 +173,56 @@ test('shows the QR image when the tenant is awaiting a scan', async () => {
   expect(img.src).toContain('http://bridge.local/tenants/t1/qr.png');
 });
 
+test('logs out after confirming, when the tenant is logged in', async () => {
+  const user = userEvent.setup();
+  vi.spyOn(window, 'confirm').mockReturnValue(true);
+  const backendClient = makeBackendClient();
+  const logout = vi.fn().mockResolvedValue({ ok: true });
+  const bridgeClient = makeBridgeClient({
+    getQrStatus: vi.fn().mockResolvedValue({ status: 'logged_in' }),
+    logout,
+  });
+  renderPage(backendClient, bridgeClient);
+
+  await user.click(await screen.findByRole('button', { name: 'Đăng xuất' }));
+
+  expect(logout).toHaveBeenCalledWith('t1');
+  window.confirm.mockRestore();
+});
+
+test('does not log out when the confirmation is cancelled', async () => {
+  const user = userEvent.setup();
+  vi.spyOn(window, 'confirm').mockReturnValue(false);
+  const backendClient = makeBackendClient();
+  const logout = vi.fn();
+  const bridgeClient = makeBridgeClient({
+    getQrStatus: vi.fn().mockResolvedValue({ status: 'logged_in' }),
+    logout,
+  });
+  renderPage(backendClient, bridgeClient);
+
+  await user.click(await screen.findByRole('button', { name: 'Đăng xuất' }));
+
+  expect(logout).not.toHaveBeenCalled();
+  window.confirm.mockRestore();
+});
+
+test('shows an error when logout fails', async () => {
+  const user = userEvent.setup();
+  vi.spyOn(window, 'confirm').mockReturnValue(true);
+  const backendClient = makeBackendClient();
+  const bridgeClient = makeBridgeClient({
+    getQrStatus: vi.fn().mockResolvedValue({ status: 'logged_in' }),
+    logout: vi.fn().mockRejectedValue(new Error('tenant not connected')),
+  });
+  renderPage(backendClient, bridgeClient);
+
+  await user.click(await screen.findByRole('button', { name: 'Đăng xuất' }));
+
+  expect(await screen.findByText('tenant not connected')).toBeInTheDocument();
+  window.confirm.mockRestore();
+});
+
 test('shows a message explaining the bridge does not know about this tenant yet', async () => {
   const backendClient = makeBackendClient();
   renderPage(backendClient, makeBridgeClient());

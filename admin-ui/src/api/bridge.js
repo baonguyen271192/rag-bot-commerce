@@ -14,5 +14,11 @@ export function createBridgeClient({ baseUrl, fetchImpl = fetch } = {}) {
       if (!res.ok) throw new Error(`getQrStatus failed with status ${res.status}`);
       return res.json();
     },
+
+    async logout(tenantId) {
+      const res = await fetchImpl(`${baseUrl}/tenants/${tenantId}/logout`, { method: 'POST' });
+      if (!res.ok) throw new Error(`logout failed with status ${res.status}`);
+      return res.json();
+    },
   };
 }

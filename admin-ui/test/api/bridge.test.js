@@ -32,6 +32,20 @@ test('getQrStatus throws on other non-ok statuses', async () => {
   await expect(client.getQrStatus('t1')).rejects.toThrow('getQrStatus failed with status 500');
 });
 
+test('logout POSTs the tenant logout endpoint', async () => {
+  const fetchImpl = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ ok: true }) });
+  const client = createBridgeClient({ baseUrl: 'http://bridge', fetchImpl });
+  const result = await client.logout('t1');
+  expect(result).toEqual({ ok: true });
+  expect(fetchImpl).toHaveBeenCalledWith('http://bridge/tenants/t1/logout', { method: 'POST' });
+});
+
+test('logout throws on a non-ok status', async () => {
+  const fetchImpl = vi.fn().mockResolvedValue({ ok: false, status: 404 });
+  const client = createBridgeClient({ baseUrl: 'http://bridge', fetchImpl });
+  await expect(client.logout('t1')).rejects.toThrow('logout failed with status 404');
+});
+
 test('exposes baseUrl for building the QR image URL', () => {
   const client = createBridgeClient({ baseUrl: 'http://bridge' });
   expect(client.baseUrl).toBe('http://bridge');
