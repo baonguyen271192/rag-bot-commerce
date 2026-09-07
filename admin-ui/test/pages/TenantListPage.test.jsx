@@ -61,5 +61,5 @@ test('shows a message when there are no tenants yet', async () => {
 
   renderPage(backendClient, bridgeClient);
 
-  await waitFor(() => expect(screen.getByText('Chưa có tenant nào.')).toBeInTheDocument());
+  await waitFor(() => expect(screen.getByText('Chưa có tenant nào')).toBeInTheDocument());
 });

@@ -122,20 +122,20 @@ export default function TenantDetailPage() {
   }
 
   if (loadError) {
-    return <p className="p-8 text-danger">Không tải được tenant: {loadError}</p>;
+    return <p className="text-danger">Không tải được tenant: {loadError}</p>;
   }
   if (!tenant) {
-    return <p className="p-8 text-gray-500">Đang tải...</p>;
+    return <p className="text-gray-500">Đang tải...</p>;
   }
 
   return (
-    <div className="mx-auto max-w-3xl space-y-8 p-8">
+    <div className="mx-auto max-w-3xl space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold text-gray-900">{tenant.name}</h1>
         <StatusBadge status={qrStatus.status} />
       </div>
 
-      <section aria-labelledby="qr-heading" className="rounded-lg border border-gray-200 p-5">
+      <section aria-labelledby="qr-heading" className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
         <h2 id="qr-heading" className="mb-3 text-lg font-medium text-gray-900">
           Đăng nhập Zalo
         </h2>
@@ -160,7 +160,7 @@ export default function TenantDetailPage() {
         )}
       </section>
 
-      <section aria-labelledby="prompt-heading" className="rounded-lg border border-gray-200 p-5">
+      <section aria-labelledby="prompt-heading" className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
         <h2 id="prompt-heading" className="mb-3 text-lg font-medium text-gray-900">
           System prompt
         </h2>
@@ -193,7 +193,7 @@ export default function TenantDetailPage() {
         </form>
       </section>
 
-      <section aria-labelledby="documents-heading" className="rounded-lg border border-gray-200 p-5">
+      <section aria-labelledby="documents-heading" className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
         <h2 id="documents-heading" className="mb-3 text-lg font-medium text-gray-900">
           Tài liệu
         </h2>

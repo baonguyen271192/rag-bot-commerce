@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { ClientsContext } from './clients-context';
 import { createBackendClient } from './api/backend';
 import { createBridgeClient } from './api/bridge';
+import AppShell from './components/AppShell';
 import TenantListPage from './pages/TenantListPage';
 import CreateTenantPage from './pages/CreateTenantPage';
 import TenantDetailPage from './pages/TenantDetailPage';
@@ -17,11 +18,13 @@ export default function App() {
   return (
     <ClientsContext.Provider value={{ backendClient, bridgeClient }}>
       <BrowserRouter>
-        <Routes>
-          <Route path="/" element={<TenantListPage />} />
-          <Route path="/tenants/new" element={<CreateTenantPage />} />
-          <Route path="/tenants/:id" element={<TenantDetailPage />} />
-        </Routes>
+        <AppShell>
+          <Routes>
+            <Route path="/" element={<TenantListPage />} />
+            <Route path="/tenants/new" element={<CreateTenantPage />} />
+            <Route path="/tenants/:id" element={<TenantDetailPage />} />
+          </Routes>
+        </AppShell>
       </BrowserRouter>
     </ClientsContext.Provider>
   );

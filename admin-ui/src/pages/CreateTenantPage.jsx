@@ -30,9 +30,12 @@ export default function CreateTenantPage() {
   }
 
   return (
-    <div className="mx-auto max-w-xl p-8">
+    <div className="mx-auto max-w-xl">
       <h1 className="mb-6 text-2xl font-semibold text-gray-900">Tạo tenant mới</h1>
-      <form onSubmit={handleSubmit} className="space-y-5">
+      <form
+        onSubmit={handleSubmit}
+        className="space-y-5 rounded-xl border border-gray-200 bg-white p-6 shadow-sm"
+      >
         <div>
           <label htmlFor="tenant-id" className="mb-1 block text-sm font-medium text-gray-700">
             Mã tenant (id)
