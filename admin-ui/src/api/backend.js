@@ -54,6 +54,17 @@ export function createBackendClient({ baseUrl, fetchImpl = fetch } = {}) {
       return data;
     },
 
+    async uploadDocumentFromUrl(tenantId, url) {
+      const res = await fetchImpl(`${baseUrl}/tenants/${tenantId}/documents/from-url`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `uploadDocumentFromUrl failed with status ${res.status}`);
+      return data;
+    },
+
     async deleteDocument(tenantId, docId) {
       const res = await fetchImpl(`${baseUrl}/tenants/${tenantId}/documents/${docId}`, { method: 'DELETE' });
       if (!res.ok && res.status !== 204) throw new Error(`deleteDocument failed with status ${res.status}`);

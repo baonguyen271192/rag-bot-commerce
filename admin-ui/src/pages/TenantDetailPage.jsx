@@ -21,6 +21,8 @@ export default function TenantDetailPage() {
   const [uploadError, setUploadError] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [dragActive, setDragActive] = useState(false);
+  const [urlInput, setUrlInput] = useState('');
+  const [submittingUrl, setSubmittingUrl] = useState(false);
 
   const [qrStatus, setQrStatus] = useState({ status: 'unknown' });
   const [loggingOut, setLoggingOut] = useState(false);
@@ -103,6 +105,22 @@ export default function TenantDetailPage() {
       setUploadError(err.message);
     } finally {
       setUploading(false);
+    }
+  }
+
+  async function handleUploadFromUrl(e) {
+    e.preventDefault();
+    if (!urlInput.trim()) return;
+    setSubmittingUrl(true);
+    setUploadError(null);
+    try {
+      await backendClient.uploadDocumentFromUrl(id, urlInput.trim());
+      setUrlInput('');
+      loadDocuments();
+    } catch (err) {
+      setUploadError(err.message);
+    } finally {
+      setSubmittingUrl(false);
     }
   }
 
@@ -259,6 +277,26 @@ export default function TenantDetailPage() {
             }}
           />
         </div>
+        <form onSubmit={handleUploadFromUrl} className="mb-4 flex gap-2">
+          <label htmlFor="document-url" className="sr-only">
+            Hoặc dán link tải trực tiếp
+          </label>
+          <input
+            id="document-url"
+            type="url"
+            value={urlInput}
+            onChange={(e) => setUrlInput(e.target.value)}
+            placeholder="Hoặc dán link tải file trực tiếp (không phải link chia sẻ Google Drive dạng xem trước)"
+            className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/30"
+          />
+          <button
+            type="submit"
+            disabled={submittingUrl || !urlInput.trim()}
+            className="cursor-pointer rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {submittingUrl ? 'Đang tải...' : 'Tải từ URL'}
+          </button>
+        </form>
         {uploading && <p className="mb-3 text-sm text-gray-500">Đang tải lên...</p>}
         {uploadError && <p className="mb-3 text-sm text-danger">{uploadError}</p>}
         {documents.length === 0 ? (

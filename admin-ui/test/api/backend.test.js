@@ -81,6 +81,24 @@ test('uploadDocument throws the backend error message on failure', async () => {
   await expect(client.uploadDocument('t1', new File(['x'], 'a.jpg'))).rejects.toThrow('khong doc duoc anh');
 });
 
+test('uploadDocumentFromUrl POSTs the url as JSON', async () => {
+  const fetchImpl = vi.fn().mockResolvedValue({ ok: true, status: 201, json: async () => ({ docId: 'd1', chunkCount: 2 }) });
+  const client = createBackendClient({ baseUrl: 'http://x', fetchImpl });
+  const result = await client.uploadDocumentFromUrl('t1', 'https://example.com/menu.md');
+  expect(result).toEqual({ docId: 'd1', chunkCount: 2 });
+  expect(fetchImpl).toHaveBeenCalledWith('http://x/tenants/t1/documents/from-url', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url: 'https://example.com/menu.md' }),
+  });
+});
+
+test('uploadDocumentFromUrl throws the backend error message on failure', async () => {
+  const fetchImpl = vi.fn().mockResolvedValue({ ok: false, status: 422, json: async () => ({ error: 'khong tai duoc file' }) });
+  const client = createBackendClient({ baseUrl: 'http://x', fetchImpl });
+  await expect(client.uploadDocumentFromUrl('t1', 'https://example.com/bad')).rejects.toThrow('khong tai duoc file');
+});
+
 test('deleteDocument DELETEs the document', async () => {
   const fetchImpl = vi.fn().mockResolvedValue({ ok: true, status: 204 });
   const client = createBackendClient({ baseUrl: 'http://x', fetchImpl });
