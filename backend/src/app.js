@@ -245,13 +245,13 @@ function createApp({ tenantStore, vectorStore, embeddingClient, ragService, llmC
           .json({ error: 'image must be a data:image/jpeg or data:image/png base64 URI' });
       }
 
-      const { reply, attachment } = await ragService.answer({
+      const { reply, attachments } = await ragService.answer({
         tenantId: req.params.id,
         conversationId: req.body.conversationId,
         text: req.body.text,
         image,
       });
-      res.json({ reply, attachment });
+      res.json({ reply, attachments });
     } catch (err) {
       next(err);
     }

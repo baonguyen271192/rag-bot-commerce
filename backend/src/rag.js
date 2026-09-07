@@ -46,19 +46,31 @@ class RagService {
     this.tenantStore.addMessage({ tenantId, conversationId, role: 'user', text });
     this.tenantStore.addMessage({ tenantId, conversationId, role: 'assistant', text: reply });
 
-    return { reply, attachment: this._attachmentFor(matches[0]) };
+    return { reply, attachments: this._attachmentsFor(matches) };
   }
 
-  // The single best-matching chunk points back at the original image/PDF page it came
-  // from (page > 0), if any -- that's the one image worth sending back with the reply.
-  // A page-tagged chunk whose document was deleted after indexing (stale vector row) is
-  // treated the same as no attachment, rather than sending a broken reference.
-  _attachmentFor(topMatch) {
-    if (!topMatch || !topMatch.page) return null;
-    const doc = this.tenantStore.getDocument(topMatch.docId);
-    if (!doc) return null;
-    const mimetype = doc.mimetype === 'application/pdf' ? 'image/png' : doc.mimetype;
-    return { docId: topMatch.docId, page: topMatch.page, mimetype };
+  // Every retrieved chunk that points back at a real image/PDF page (page > 0) is worth
+  // sending, not just the single best match -- a broad question like "menu" legitimately
+  // pulls chunks from several pages, and text-only for the rest would be inconsistent
+  // with a reply that already mentions their content. Deduped by docId+page (multiple
+  // chunks commonly share a page) and capped at the vector search's own k, so this never
+  // sends more images than chunks retrieved. A page-tagged chunk whose document was
+  // deleted after indexing (stale vector row) is skipped rather than sending a broken
+  // reference.
+  _attachmentsFor(matches) {
+    const seen = new Set();
+    const attachments = [];
+    for (const match of matches) {
+      if (!match || !match.page) continue;
+      const key = `${match.docId}#${match.page}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const doc = this.tenantStore.getDocument(match.docId);
+      if (!doc) continue;
+      const mimetype = doc.mimetype === 'application/pdf' ? 'image/png' : doc.mimetype;
+      attachments.push({ docId: match.docId, page: match.page, mimetype });
+    }
+    return attachments;
   }
 }
 

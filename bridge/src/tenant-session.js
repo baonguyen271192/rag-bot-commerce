@@ -6,14 +6,14 @@ const { shouldHandleMessage, extractMessageContent, handleIncomingMessage } = re
 
 const IMAGE_EXTENSION_BY_CONTENT_TYPE = { 'image/png': '.png', 'image/jpeg': '.jpg' };
 
-function buildSendMessageArg(replyText, imageAttachment) {
-  if (!imageAttachment) return replyText;
-  const ext = IMAGE_EXTENSION_BY_CONTENT_TYPE[imageAttachment.contentType] || '.jpg';
+function buildSendMessageArg(replyText, imageAttachments) {
+  if (!imageAttachments || imageAttachments.length === 0) return replyText;
   return {
     msg: replyText,
-    attachments: [
-      { data: imageAttachment.data, filename: `menu${ext}`, metadata: { totalSize: imageAttachment.data.length } },
-    ],
+    attachments: imageAttachments.map((img, i) => {
+      const ext = IMAGE_EXTENSION_BY_CONTENT_TYPE[img.contentType] || '.jpg';
+      return { data: img.data, filename: `menu-${i + 1}${ext}`, metadata: { totalSize: img.data.length } };
+    }),
   };
 }
 
@@ -72,8 +72,8 @@ async function startTenantSession({
         conversationId,
         text,
         image,
-        sendReply: (replyText, imageAttachment) =>
-          api.sendMessage(buildSendMessageArg(replyText, imageAttachment), conversationId, message.type),
+        sendReply: (replyText, imageAttachments) =>
+          api.sendMessage(buildSendMessageArg(replyText, imageAttachments), conversationId, message.type),
         logger,
       });
     } catch (err) {

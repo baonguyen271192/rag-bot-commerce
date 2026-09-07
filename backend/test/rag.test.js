@@ -44,10 +44,10 @@ test('answer embeds the question, searches the tenant vector store, and asks the
   });
   const rag = new RagService(fakes);
 
-  const { reply, attachment } = await rag.answer({ tenantId: 't1', conversationId: 'c1', text: 'may gio mo cua?' });
+  const { reply, attachments } = await rag.answer({ tenantId: 't1', conversationId: 'c1', text: 'may gio mo cua?' });
 
   assert.equal(reply, 'Nha hang mo cua 7h-21h30.');
-  assert.equal(attachment, null);
+  assert.deepEqual(attachments, []);
   assert.deepEqual(fakes.embedCalls[0], ['may gio mo cua?']);
   assert.equal(fakes.searchCalls[0].tenantId, 't1');
   assert.deepEqual(fakes.searchCalls[0].embedding, [1, 0, 0]);
@@ -138,12 +138,12 @@ test('answer includes an attachment pointing at the top match\'s page when it ca
   });
   const rag = new RagService(fakes);
 
-  const { attachment } = await rag.answer({ tenantId: 't1', conversationId: 'c1', text: 'com nieu gia bao nhieu' });
+  const { attachments } = await rag.answer({ tenantId: 't1', conversationId: 'c1', text: 'com nieu gia bao nhieu' });
 
-  assert.deepEqual(attachment, { docId: 'menu.pdf_1', page: 3, mimetype: 'image/png' });
+  assert.deepEqual(attachments, [{ docId: 'menu.pdf_1', page: 3, mimetype: 'image/png' }]);
 });
 
-test('answer includes an attachment with the original mimetype when the top match came from an uploaded image', async () => {
+test('answer includes an attachment with the original mimetype when a match came from an uploaded image', async () => {
   const fakes = makeFakes({
     tenant: { id: 't1', systemPrompt: 'p' },
     searchResults: [{ text: 'Pho bo - 65000', score: 0.05, docId: 'menu.jpg_1', page: 1 }],
@@ -152,12 +152,12 @@ test('answer includes an attachment with the original mimetype when the top matc
   });
   const rag = new RagService(fakes);
 
-  const { attachment } = await rag.answer({ tenantId: 't1', conversationId: 'c1', text: 'pho bo gia bao nhieu' });
+  const { attachments } = await rag.answer({ tenantId: 't1', conversationId: 'c1', text: 'pho bo gia bao nhieu' });
 
-  assert.deepEqual(attachment, { docId: 'menu.jpg_1', page: 1, mimetype: 'image/jpeg' });
+  assert.deepEqual(attachments, [{ docId: 'menu.jpg_1', page: 1, mimetype: 'image/jpeg' }]);
 });
 
-test('answer has no attachment when the top match has no page (plain text document)', async () => {
+test('answer returns no attachments when no match has a page (plain text document)', async () => {
   const fakes = makeFakes({
     tenant: { id: 't1', systemPrompt: 'p' },
     searchResults: [{ text: 'Gio mo cua: 7h-21h30', score: 0.05, docId: 'info.md_1', page: 0 }],
@@ -166,12 +166,12 @@ test('answer has no attachment when the top match has no page (plain text docume
   });
   const rag = new RagService(fakes);
 
-  const { attachment } = await rag.answer({ tenantId: 't1', conversationId: 'c1', text: 'gio mo cua' });
+  const { attachments } = await rag.answer({ tenantId: 't1', conversationId: 'c1', text: 'gio mo cua' });
 
-  assert.equal(attachment, null);
+  assert.deepEqual(attachments, []);
 });
 
-test('answer has no attachment when the top match\'s document was deleted after indexing', async () => {
+test('answer skips a match whose document was deleted after indexing, without failing the whole request', async () => {
   const fakes = makeFakes({
     tenant: { id: 't1', systemPrompt: 'p' },
     searchResults: [{ text: 'stale chunk', score: 0.05, docId: 'deleted-doc', page: 2 }],
@@ -180,7 +180,32 @@ test('answer has no attachment when the top match\'s document was deleted after 
   });
   const rag = new RagService(fakes);
 
-  const { attachment } = await rag.answer({ tenantId: 't1', conversationId: 'c1', text: 'hoi gi do' });
+  const { attachments } = await rag.answer({ tenantId: 't1', conversationId: 'c1', text: 'hoi gi do' });
 
-  assert.equal(attachment, null);
+  assert.deepEqual(attachments, []);
+});
+
+test('answer includes one attachment per distinct page across all retrieved matches, for a broad question', async () => {
+  const fakes = makeFakes({
+    tenant: { id: 't1', systemPrompt: 'p' },
+    searchResults: [
+      { text: 'Khai vi: Banh trang nuong - 65000', score: 0.02, docId: 'menu.pdf_1', page: 1 },
+      { text: 'Khai vi: Salad dau giam - 105000', score: 0.03, docId: 'menu.pdf_1', page: 1 },
+      { text: 'Mon chinh: Ca kho to - 135000', score: 0.05, docId: 'menu.pdf_1', page: 2 },
+      { text: 'Gio mo cua: 7h-21h30', score: 0.09, docId: 'info.md_1', page: 0 },
+    ],
+    llmReply: 'Duoi day la thuc don...',
+    documents: {
+      'menu.pdf_1': { id: 'menu.pdf_1', mimetype: 'application/pdf' },
+      'info.md_1': { id: 'info.md_1', mimetype: 'text/markdown' },
+    },
+  });
+  const rag = new RagService(fakes);
+
+  const { attachments } = await rag.answer({ tenantId: 't1', conversationId: 'c1', text: 'menu' });
+
+  assert.deepEqual(attachments, [
+    { docId: 'menu.pdf_1', page: 1, mimetype: 'image/png' },
+    { docId: 'menu.pdf_1', page: 2, mimetype: 'image/png' },
+  ]);
 });

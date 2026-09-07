@@ -26,7 +26,7 @@ class BackendClient {
       throw new Error(`ask failed with status ${res.status}`);
     }
     const data = await res.json();
-    return { reply: data.reply, attachment: data.attachment || null };
+    return { reply: data.reply, attachments: data.attachments || [] };
   }
 
   async downloadDocumentImage(tenantId, docId, page) {

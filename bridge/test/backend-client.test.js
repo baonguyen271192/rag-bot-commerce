@@ -45,7 +45,7 @@ test('ask POSTs conversationId, text, and image to /tenants/:id/ask and returns 
 
   const result = await client.ask('t1', { conversationId: 'c1', text: 'hi', image: 'data:image/png;base64,AAA=' });
 
-  assert.deepEqual(result, { reply: 'Chao ban!', attachment: null });
+  assert.deepEqual(result, { reply: 'Chao ban!', attachments: [] });
   assert.equal(calls[0].url, 'http://backend.local/tenants/t1/ask');
   assert.equal(calls[0].opts.method, 'POST');
   assert.deepEqual(JSON.parse(calls[0].opts.body), {
@@ -102,18 +102,27 @@ test('ask throws a clear error on a non-ok response', async () => {
   await assert.rejects(() => client.ask('missing', { conversationId: 'c1', text: 'hi' }), /ask failed with status 404/);
 });
 
-test('ask passes the attachment through when the backend includes one', async () => {
+test('ask passes the attachments through when the backend includes some', async () => {
   const client = new BackendClient({
     baseUrl: 'http://backend.local',
     fetchImpl: fakeFetch(async () => ({
       ok: true,
-      json: async () => ({ reply: 'Com nieu gia 20.000d', attachment: { docId: 'menu.pdf_1', page: 3, mimetype: 'image/png' } }),
+      json: async () => ({
+        reply: 'Duoi day la thuc don...',
+        attachments: [
+          { docId: 'menu.pdf_1', page: 1, mimetype: 'image/png' },
+          { docId: 'menu.pdf_1', page: 2, mimetype: 'image/png' },
+        ],
+      }),
     })),
   });
 
-  const result = await client.ask('t1', { conversationId: 'c1', text: 'com nieu gia bao nhieu' });
+  const result = await client.ask('t1', { conversationId: 'c1', text: 'menu' });
 
-  assert.deepEqual(result.attachment, { docId: 'menu.pdf_1', page: 3, mimetype: 'image/png' });
+  assert.deepEqual(result.attachments, [
+    { docId: 'menu.pdf_1', page: 1, mimetype: 'image/png' },
+    { docId: 'menu.pdf_1', page: 2, mimetype: 'image/png' },
+  ]);
 });
 
 test('downloadDocumentImage GETs the tenant document image endpoint with the page query param', async () => {

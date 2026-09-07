@@ -34,7 +34,7 @@ test('startTenantSession replies in-place to a DM', async () => {
   const backendClient = {
     ask: async (tenantId, args) => {
       askCalls.push({ tenantId, args });
-      return { reply: 'Chao ban!', attachment: null };
+      return { reply: 'Chao ban!', attachments: [] };
     },
   };
 
@@ -60,7 +60,7 @@ test('startTenantSession sends the reply with the document image attached when t
   const backendClient = {
     ask: async () => ({
       reply: 'Com nieu gia 20.000d',
-      attachment: { docId: 'menu.pdf_1', page: 3, mimetype: 'image/png' },
+      attachments: [{ docId: 'menu.pdf_1', page: 3, mimetype: 'image/png' }],
     }),
     downloadDocumentImage: async () => ({ data: imageData, contentType: 'image/png' }),
   };
@@ -80,14 +80,53 @@ test('startTenantSession sends the reply with the document image attached when t
   assert.equal(sentMessages.length, 1);
   assert.deepEqual(sentMessages[0].text, {
     msg: 'Com nieu gia 20.000d',
-    attachments: [{ data: imageData, filename: 'menu.png', metadata: { totalSize: 3 } }],
+    attachments: [{ data: imageData, filename: 'menu-1.png', metadata: { totalSize: 3 } }],
   });
   assert.equal(sentMessages[0].threadId, 'user-1');
 });
 
+test('startTenantSession sends the reply with all document images attached when the backend includes several', async () => {
+  const { api, handlers, sentMessages } = makeFakeApi();
+  const page1 = Buffer.from([1]);
+  const page2 = Buffer.from([2]);
+  const backendClient = {
+    ask: async () => ({
+      reply: 'Duoi day la thuc don...',
+      attachments: [
+        { docId: 'menu.pdf_1', page: 1, mimetype: 'image/png' },
+        { docId: 'menu.pdf_1', page: 2, mimetype: 'image/png' },
+      ],
+    }),
+    downloadDocumentImage: async (tenantId, docId, page) => ({
+      data: page === 1 ? page1 : page2,
+      contentType: 'image/png',
+    }),
+  };
+
+  await startTenantSession({
+    tenantId: 't1',
+    backendClient,
+    credentialsPath: '/tmp/unused-creds.json',
+    qrPath: '/tmp/unused-qr.png',
+    onStatusChange: () => {},
+    createZaloApiImpl: async () => api,
+    ThreadType,
+  });
+
+  await handlers.message({ type: ThreadType.User, data: { content: 'menu', uidFrom: 'user-1' }, threadId: 'user-1' });
+
+  assert.deepEqual(sentMessages[0].text, {
+    msg: 'Duoi day la thuc don...',
+    attachments: [
+      { data: page1, filename: 'menu-1.png', metadata: { totalSize: 1 } },
+      { data: page2, filename: 'menu-2.png', metadata: { totalSize: 1 } },
+    ],
+  });
+});
+
 test('startTenantSession replies into the group thread when mentioned', async () => {
   const { api, handlers, sentMessages } = makeFakeApi({ ownUid: 'bot-uid' });
-  const backendClient = { ask: async () => ({ reply: 'ok', attachment: null }) };
+  const backendClient = { ask: async () => ({ reply: 'ok', attachments: [] }) };
 
   await startTenantSession({
     tenantId: 't1',
@@ -110,7 +149,7 @@ test('startTenantSession replies into the group thread when mentioned', async ()
 
 test('startTenantSession ignores group messages that do not mention the bot', async () => {
   const { api, handlers, sentMessages } = makeFakeApi();
-  const backendClient = { ask: async () => ({ reply: 'should not be called', attachment: null }) };
+  const backendClient = { ask: async () => ({ reply: 'should not be called', attachments: [] }) };
 
   await startTenantSession({
     tenantId: 't1',
@@ -153,7 +192,7 @@ test('startTenantSession does not crash the process when the listener callback t
 
 test('startTenantSession catches a synchronous throw in message filtering and does not crash', async () => {
   const { api, handlers } = makeFakeApi();
-  const backendClient = { ask: async () => ({ reply: 'unused', attachment: null }) };
+  const backendClient = { ask: async () => ({ reply: 'unused', attachments: [] }) };
   const logged = [];
 
   await startTenantSession({
@@ -179,7 +218,7 @@ test('startTenantSession catches a synchronous throw in message filtering and do
 test('startTenantSession reports status error when the Zalo session closes unexpectedly', async () => {
   const { api, handlers } = makeFakeApi();
   const statusUpdates = [];
-  const backendClient = { ask: async () => ({ reply: 'unused', attachment: null }) };
+  const backendClient = { ask: async () => ({ reply: 'unused', attachments: [] }) };
 
   await startTenantSession({
     tenantId: 't1',
@@ -205,7 +244,7 @@ test('startTenantSession removes stale credentials and restarts the login flow a
   fs.writeFileSync(credentialsPath, '{"stale":true}');
   const { api, handlers } = makeFakeApi();
   const statusUpdates = [];
-  const backendClient = { ask: async () => ({ reply: 'unused', attachment: null }) };
+  const backendClient = { ask: async () => ({ reply: 'unused', attachments: [] }) };
   let createCalls = 0;
 
   await startTenantSession({
@@ -237,7 +276,7 @@ test('startTenantSession removes stale credentials and restarts the login flow a
 test('startTenantSession does not throw when there are no credentials to remove on close', async () => {
   const credentialsPath = path.join(os.tmpdir(), `bridge-test-creds-missing-${Date.now()}-${Math.random()}.json`);
   const { api, handlers } = makeFakeApi();
-  const backendClient = { ask: async () => ({ reply: 'unused', attachment: null }) };
+  const backendClient = { ask: async () => ({ reply: 'unused', attachments: [] }) };
 
   await startTenantSession({
     tenantId: 't1',
@@ -265,7 +304,7 @@ test('logout stops the listener, removes credentials, and restarts the login flo
 
   const { logout } = await startTenantSession({
     tenantId: 't1',
-    backendClient: { ask: async () => ({ reply: 'unused', attachment: null }) },
+    backendClient: { ask: async () => ({ reply: 'unused', attachments: [] }) },
     credentialsPath,
     qrPath: '/tmp/unused-qr.png',
     onStatusChange: () => {},
@@ -301,7 +340,7 @@ test('onSessionReady fires again with a fresh logout handle after a restart, not
 
   await startTenantSession({
     tenantId: 't1',
-    backendClient: { ask: async () => ({ reply: 'unused', attachment: null }) },
+    backendClient: { ask: async () => ({ reply: 'unused', attachments: [] }) },
     credentialsPath,
     qrPath: '/tmp/unused-qr.png',
     onStatusChange: () => {},

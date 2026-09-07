@@ -407,10 +407,10 @@ test('POST /tenants/:id/ask returns the RAG reply', async () => {
 
   assert.equal(res.status, 200);
   assert.equal(res.body.reply, 'Chao ban, gio mo cua la 7h-21h30.');
-  assert.equal(res.body.attachment, null);
+  assert.deepEqual(res.body.attachments, []);
 });
 
-test('POST /tenants/:id/ask includes an attachment when the top search match came from an uploaded pdf page', async () => {
+test('POST /tenants/:id/ask includes an attachment when a search match came from an uploaded pdf page', async () => {
   const pdfBytes = await makeRealPdfBuffer('Com nieu - 20000');
   const searchResults = [];
   const { app } = makeApp({ llmReply: 'Com nieu gia 20.000d', searchResults });
@@ -425,7 +425,7 @@ test('POST /tenants/:id/ask includes an attachment when the top search match cam
     .send({ conversationId: 'c1', text: 'com nieu gia bao nhieu' });
 
   assert.equal(res.status, 200);
-  assert.deepEqual(res.body.attachment, { docId: uploadRes.body.docId, page: 1, mimetype: 'image/png' });
+  assert.deepEqual(res.body.attachments, [{ docId: uploadRes.body.docId, page: 1, mimetype: 'image/png' }]);
 });
 
 test('POST /tenants/:id/ask returns 404 for an unknown tenant', async () => {

@@ -62,15 +62,16 @@ async function extractMessageContent(message, { fetchImpl = fetch, logger = cons
 
 async function handleIncomingMessage({ backendClient, tenantId, conversationId, text, image, sendReply, logger = console }) {
   try {
-    const { reply, attachment } = await backendClient.ask(tenantId, { conversationId, text, image });
-    let imageAttachment = null;
-    if (attachment) {
+    const { reply, attachments } = await backendClient.ask(tenantId, { conversationId, text, image });
+    const imageAttachments = [];
+    for (const attachment of attachments || []) {
       try {
-        imageAttachment = await backendClient.downloadDocumentImage(tenantId, attachment.docId, attachment.page);
+        imageAttachments.push(await backendClient.downloadDocumentImage(tenantId, attachment.docId, attachment.page));
       } catch (err) {
         // The text reply is still correct and worth sending -- a missing/broken image
-        // attachment shouldn't turn a good answer into the generic fallback message.
-        logger.error('bridge: failed to download document image, sending text-only reply', {
+        // attachment shouldn't turn a good answer into the generic fallback message, and
+        // one bad attachment shouldn't drop the others.
+        logger.error('bridge: failed to download document image, skipping it', {
           tenantId,
           conversationId,
           docId: attachment.docId,
@@ -78,7 +79,7 @@ async function handleIncomingMessage({ backendClient, tenantId, conversationId, 
         });
       }
     }
-    await sendReply(reply || FALLBACK_MESSAGE, imageAttachment);
+    await sendReply(reply || FALLBACK_MESSAGE, imageAttachments);
   } catch (err) {
     logger.error('bridge: failed to handle message', { tenantId, conversationId, error: err.message });
     await sendReply(FALLBACK_MESSAGE);

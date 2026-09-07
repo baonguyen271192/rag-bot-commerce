@@ -122,7 +122,7 @@ test('extractMessageContent falls back gracefully when the image download fails'
 });
 
 test('handleIncomingMessage sends the backend reply', async () => {
-  const backendClient = { ask: async () => ({ reply: 'Nha hang mo cua 7h-21h30.', attachment: null }) };
+  const backendClient = { ask: async () => ({ reply: 'Nha hang mo cua 7h-21h30.', attachments: [] }) };
   const sent = [];
   await handleIncomingMessage({
     backendClient,
@@ -130,18 +130,18 @@ test('handleIncomingMessage sends the backend reply', async () => {
     conversationId: 'c1',
     text: 'may gio mo cua?',
     image: null,
-    sendReply: async (text, imageAttachment) => sent.push({ text, imageAttachment }),
+    sendReply: async (text, imageAttachments) => sent.push({ text, imageAttachments }),
   });
-  assert.deepEqual(sent, [{ text: 'Nha hang mo cua 7h-21h30.', imageAttachment: null }]);
+  assert.deepEqual(sent, [{ text: 'Nha hang mo cua 7h-21h30.', imageAttachments: [] }]);
 });
 
-test('handleIncomingMessage downloads and sends the document image when the backend includes an attachment', async () => {
+test('handleIncomingMessage downloads and sends the document image when the backend includes one attachment', async () => {
   const downloadCalls = [];
   const imageBuffer = { data: Buffer.from([1, 2, 3]), contentType: 'image/png' };
   const backendClient = {
     ask: async () => ({
       reply: 'Com nieu gia 20.000d',
-      attachment: { docId: 'menu.pdf_1', page: 3, mimetype: 'image/png' },
+      attachments: [{ docId: 'menu.pdf_1', page: 3, mimetype: 'image/png' }],
     }),
     downloadDocumentImage: async (tenantId, docId, page) => {
       downloadCalls.push({ tenantId, docId, page });
@@ -155,18 +155,73 @@ test('handleIncomingMessage downloads and sends the document image when the back
     conversationId: 'c1',
     text: 'com nieu gia bao nhieu',
     image: null,
-    sendReply: async (text, imageAttachment) => sent.push({ text, imageAttachment }),
+    sendReply: async (text, imageAttachments) => sent.push({ text, imageAttachments }),
   });
 
   assert.deepEqual(downloadCalls, [{ tenantId: 't1', docId: 'menu.pdf_1', page: 3 }]);
-  assert.deepEqual(sent, [{ text: 'Com nieu gia 20.000d', imageAttachment: imageBuffer }]);
+  assert.deepEqual(sent, [{ text: 'Com nieu gia 20.000d', imageAttachments: [imageBuffer] }]);
 });
 
-test('handleIncomingMessage sends a text-only reply when the image download fails, instead of falling back entirely', async () => {
+test('handleIncomingMessage downloads and sends every attachment when the backend includes several', async () => {
+  const page1 = { data: Buffer.from([1]), contentType: 'image/png' };
+  const page2 = { data: Buffer.from([2]), contentType: 'image/png' };
+  const backendClient = {
+    ask: async () => ({
+      reply: 'Duoi day la thuc don...',
+      attachments: [
+        { docId: 'menu.pdf_1', page: 1, mimetype: 'image/png' },
+        { docId: 'menu.pdf_1', page: 2, mimetype: 'image/png' },
+      ],
+    }),
+    downloadDocumentImage: async (tenantId, docId, page) => (page === 1 ? page1 : page2),
+  };
+  const sent = [];
+  await handleIncomingMessage({
+    backendClient,
+    tenantId: 't1',
+    conversationId: 'c1',
+    text: 'menu',
+    image: null,
+    sendReply: async (text, imageAttachments) => sent.push({ text, imageAttachments }),
+  });
+
+  assert.deepEqual(sent, [{ text: 'Duoi day la thuc don...', imageAttachments: [page1, page2] }]);
+});
+
+test('handleIncomingMessage still sends the other attachments when one image download fails', async () => {
+  const page2 = { data: Buffer.from([2]), contentType: 'image/png' };
+  const backendClient = {
+    ask: async () => ({
+      reply: 'Duoi day la thuc don...',
+      attachments: [
+        { docId: 'menu.pdf_1', page: 1, mimetype: 'image/png' },
+        { docId: 'menu.pdf_1', page: 2, mimetype: 'image/png' },
+      ],
+    }),
+    downloadDocumentImage: async (tenantId, docId, page) => {
+      if (page === 1) throw new Error('downloadDocumentImage failed with status 404');
+      return page2;
+    },
+  };
+  const sent = [];
+  await handleIncomingMessage({
+    backendClient,
+    tenantId: 't1',
+    conversationId: 'c1',
+    text: 'menu',
+    image: null,
+    sendReply: async (text, imageAttachments) => sent.push({ text, imageAttachments }),
+    logger: { error: () => {} },
+  });
+
+  assert.deepEqual(sent, [{ text: 'Duoi day la thuc don...', imageAttachments: [page2] }]);
+});
+
+test('handleIncomingMessage sends a text-only reply when the only image download fails, instead of falling back entirely', async () => {
   const backendClient = {
     ask: async () => ({
       reply: 'Com nieu gia 20.000d',
-      attachment: { docId: 'menu.pdf_1', page: 3, mimetype: 'image/png' },
+      attachments: [{ docId: 'menu.pdf_1', page: 3, mimetype: 'image/png' }],
     }),
     downloadDocumentImage: async () => {
       throw new Error('downloadDocumentImage failed with status 404');
@@ -179,11 +234,11 @@ test('handleIncomingMessage sends a text-only reply when the image download fail
     conversationId: 'c1',
     text: 'com nieu gia bao nhieu',
     image: null,
-    sendReply: async (text, imageAttachment) => sent.push({ text, imageAttachment }),
+    sendReply: async (text, imageAttachments) => sent.push({ text, imageAttachments }),
     logger: { error: () => {} },
   });
 
-  assert.deepEqual(sent, [{ text: 'Com nieu gia 20.000d', imageAttachment: null }]);
+  assert.deepEqual(sent, [{ text: 'Com nieu gia 20.000d', imageAttachments: [] }]);
 });
 
 test('handleIncomingMessage sends the fallback message when the backend call throws', async () => {
@@ -206,7 +261,7 @@ test('handleIncomingMessage sends the fallback message when the backend call thr
 });
 
 test('handleIncomingMessage sends the fallback message when the backend returns no usable reply', async () => {
-  const backendClient = { ask: async () => ({ reply: '', attachment: null }) };
+  const backendClient = { ask: async () => ({ reply: '', attachments: [] }) };
   const sent = [];
   await handleIncomingMessage({
     backendClient,
