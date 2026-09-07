@@ -6,10 +6,13 @@ const { shouldHandleMessage, extractMessageContent, handleIncomingMessage } = re
 
 const IMAGE_EXTENSION_BY_CONTENT_TYPE = { 'image/png': '.png', 'image/jpeg': '.jpg' };
 
+// When there's a real menu photo to show, the raw markdown-table reply text is
+// redundant on top of it (Zalo doesn't render markdown -- customers would see the "##"
+// and "|---|---|" literally) -- send the image(s) alone, no caption.
 function buildSendMessageArg(replyText, imageAttachments) {
   if (!imageAttachments || imageAttachments.length === 0) return replyText;
   return {
-    msg: replyText,
+    msg: '',
     attachments: imageAttachments.map((img, i) => {
       const ext = IMAGE_EXTENSION_BY_CONTENT_TYPE[img.contentType] || '.jpg';
       return { data: img.data, filename: `menu-${i + 1}${ext}`, metadata: { totalSize: img.data.length } };

@@ -54,7 +54,7 @@ test('startTenantSession replies in-place to a DM', async () => {
   assert.deepEqual(sentMessages, [{ text: 'Chao ban!', threadId: 'user-1', type: ThreadType.User }]);
 });
 
-test('startTenantSession sends the reply with the document image attached when the backend includes one', async () => {
+test('startTenantSession sends the document image alone, with no text caption, when the backend includes one', async () => {
   const { api, handlers, sentMessages } = makeFakeApi();
   const imageData = Buffer.from([1, 2, 3]);
   const backendClient = {
@@ -79,13 +79,13 @@ test('startTenantSession sends the reply with the document image attached when t
 
   assert.equal(sentMessages.length, 1);
   assert.deepEqual(sentMessages[0].text, {
-    msg: 'Com nieu gia 20.000d',
+    msg: '',
     attachments: [{ data: imageData, filename: 'menu-1.png', metadata: { totalSize: 3 } }],
   });
   assert.equal(sentMessages[0].threadId, 'user-1');
 });
 
-test('startTenantSession sends the reply with all document images attached when the backend includes several', async () => {
+test('startTenantSession sends all document images alone, with no text caption, when the backend includes several', async () => {
   const { api, handlers, sentMessages } = makeFakeApi();
   const page1 = Buffer.from([1]);
   const page2 = Buffer.from([2]);
@@ -116,7 +116,7 @@ test('startTenantSession sends the reply with all document images attached when 
   await handlers.message({ type: ThreadType.User, data: { content: 'menu', uidFrom: 'user-1' }, threadId: 'user-1' });
 
   assert.deepEqual(sentMessages[0].text, {
-    msg: 'Duoi day la thuc don...',
+    msg: '',
     attachments: [
       { data: page1, filename: 'menu-1.png', metadata: { totalSize: 1 } },
       { data: page2, filename: 'menu-2.png', metadata: { totalSize: 1 } },
