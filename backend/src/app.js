@@ -6,7 +6,7 @@ const cors = require('cors');
 const { PDFParse } = require('pdf-parse');
 const { chunkText } = require('./chunker');
 
-const MAX_DOCUMENT_BYTES = 5 * 1024 * 1024;
+const MAX_DOCUMENT_BYTES = 20 * 1024 * 1024;
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: MAX_DOCUMENT_BYTES } });
 
 const IMAGE_DATA_URI_RE = /^data:image\/(jpeg|png);base64,/;
@@ -197,7 +197,7 @@ function createApp({ tenantStore, vectorStore, embeddingClient, ragService, llmC
 
   app.use((err, req, res, next) => {
     if (err instanceof multer.MulterError && err.code === 'LIMIT_FILE_SIZE') {
-      return res.status(413).json({ error: 'file qua lon (toi da 5MB)' });
+      return res.status(413).json({ error: 'file qua lon (toi da 20MB)' });
     }
     console.error('backend: unhandled route error', err);
     res.status(500).json({ error: 'internal error' });

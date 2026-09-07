@@ -29,7 +29,7 @@ OPENAI_API_KEY=... OPENROUTER_API_KEY=... node index.js
 - `GET /tenants` → danh sách tenant
 - `GET /tenants/:id` → chi tiết 1 tenant
 - `PUT /tenants/:id` `{systemPrompt}` → sửa persona
-- `POST /tenants/:id/documents` (multipart, field `file`) → upload + index tài liệu. `.md`/`.txt`: đọc trực tiếp. `.jpg`/`.png`: trích xuất nội dung qua vision LLM trước khi index. `.pdf`: trích xuất text bằng `pdf-parse` (trả `422` nếu PDF không có text, ví dụ PDF dạng ảnh scan) (tối đa 5MB, trả `422` nếu không đọc được ảnh)
+- `POST /tenants/:id/documents` (multipart, field `file`) → upload + index tài liệu. `.md`/`.txt`: đọc trực tiếp. `.jpg`/`.png`: trích xuất nội dung qua vision LLM trước khi index. `.pdf`: trích xuất text bằng `pdf-parse` (trả `422` nếu PDF không có text, ví dụ PDF dạng ảnh scan) (tối đa 20MB, trả `413` nếu quá lớn, `422` nếu không đọc được ảnh)
 - `GET /tenants/:id/documents` → danh sách tài liệu đã upload (`{id, filename, chunkCount, createdAt}[]`)
 - `DELETE /tenants/:id/documents/:docId` → xoá tài liệu khỏi LanceDB và khỏi danh sách
 - `POST /tenants/:id/ask` `{conversationId, text, image?}` → `{reply}` (`image`: base64 data URI `data:image/jpeg;base64,...` hoặc `data:image/png;base64,...`, tuỳ chọn — chỉ dùng cho lượt trả lời này, không lưu vào kho tài liệu)

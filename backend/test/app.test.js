@@ -269,16 +269,16 @@ test('POST /tenants/:id/documents returns 422 for a PDF with no extractable text
   assert.equal(res.status, 422);
 });
 
-test('POST /tenants/:id/documents returns a clear 413 (not a generic 500) when the file exceeds 5MB', async () => {
+test('POST /tenants/:id/documents returns a clear 413 (not a generic 500) when the file exceeds 20MB', async () => {
   const { app } = makeApp();
   await request(app).post('/tenants').send({ id: 't1', name: 'A', systemPrompt: 'p' });
 
   const res = await request(app)
     .post('/tenants/t1/documents')
-    .attach('file', Buffer.alloc(6 * 1024 * 1024), { filename: 'big.pdf', contentType: 'application/pdf' });
+    .attach('file', Buffer.alloc(21 * 1024 * 1024), { filename: 'big.pdf', contentType: 'application/pdf' });
 
   assert.equal(res.status, 413);
-  assert.match(res.body.error, /5MB/);
+  assert.match(res.body.error, /20MB/);
 });
 
 test('POST /tenants/:id/documents returns a clear 502 (not a generic 500) when the embedding call fails', async () => {
