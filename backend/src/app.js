@@ -3,6 +3,7 @@
 const express = require('express');
 const multer = require('multer');
 const cors = require('cors');
+const { PDFParse } = require('pdf-parse');
 const { chunkText } = require('./chunker');
 
 const MAX_DOCUMENT_BYTES = 5 * 1024 * 1024;
@@ -10,12 +11,7 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: MAX
 
 const IMAGE_DATA_URI_RE = /^data:image\/(jpeg|png);base64,/;
 const IMAGE_MIMETYPES = { 'image/jpeg': true, 'image/png': true };
-const EXTENSION_BY_MIMETYPE = {
-  'text/markdown': '.md',
-  'text/plain': '.txt',
-  'image/jpeg': '.jpg',
-  'image/png': '.png',
-};
+const PDF_MIMETYPE = 'application/pdf';
 const VISION_EXTRACT_SYSTEM_PROMPT =
   'Ban la cong cu trich xuat noi dung tai lieu tu anh. Doc toan bo chu va thong tin trong anh ' +
   '(ten mon, gia, mo ta, ghi chu...) va chep lai chinh xac, day du thanh van ban thuan. ' +
@@ -61,6 +57,22 @@ async function processDocumentBuffer({
     if (!text || !text.trim()) {
       throw new DocumentProcessingError(422, 'anh khong co noi dung doc duoc');
     }
+  } else if (mimetype === PDF_MIMETYPE) {
+    const parser = new PDFParse({ data: buffer });
+    try {
+      const result = await parser.getText();
+      text = result.text;
+    } catch (err) {
+      throw new DocumentProcessingError(422, `khong the doc file pdf: ${err.message}`);
+    } finally {
+      await parser.destroy();
+    }
+    if (!text || !text.trim()) {
+      throw new DocumentProcessingError(
+        422,
+        'khong tim thay chu trong file pdf (co the la pdf dang anh scan, hay thu chup anh tung trang va upload anh thay the)'
+      );
+    }
   } else {
     text = buffer.toString('utf8');
   }
@@ -80,20 +92,7 @@ async function processDocumentBuffer({
   return { docId, chunkCount: chunks.length };
 }
 
-const REJECTED_URL_CONTENT_TYPES = { 'text/html': true, 'application/json': true, 'application/xml': true };
-
-function filenameFromUrl(url, contentType) {
-  try {
-    const { pathname } = new URL(url);
-    const last = decodeURIComponent(pathname.split('/').filter(Boolean).pop() || '');
-    if (last) return last;
-  } catch {
-    // fall through to a generic name below
-  }
-  return `document${EXTENSION_BY_MIMETYPE[contentType] || ''}`;
-}
-
-function createApp({ tenantStore, vectorStore, embeddingClient, ragService, llmClient, fetchImpl = fetch }) {
+function createApp({ tenantStore, vectorStore, embeddingClient, ragService, llmClient }) {
   const app = express();
   app.use(cors());
   app.use(express.json({ limit: '10mb' }));
@@ -136,56 +135,6 @@ function createApp({ tenantStore, vectorStore, embeddingClient, ragService, llmC
         filename: req.file.originalname,
         mimetype: req.file.mimetype,
         buffer: req.file.buffer,
-        llmClient,
-        embeddingClient,
-        vectorStore,
-        tenantStore,
-      });
-      res.status(201).json(result);
-    } catch (err) {
-      if (err instanceof DocumentProcessingError) return res.status(err.status).json({ error: err.message });
-      next(err);
-    }
-  });
-
-  app.post('/tenants/:id/documents/from-url', async (req, res, next) => {
-    try {
-      const tenant = tenantStore.getTenant(req.params.id);
-      if (!tenant) return res.status(404).json({ error: 'tenant not found' });
-
-      const { url } = req.body;
-      if (!url || typeof url !== 'string') {
-        return res.status(400).json({ error: 'url is required' });
-      }
-
-      let fetchRes;
-      try {
-        fetchRes = await fetchImpl(url);
-      } catch (err) {
-        return res.status(422).json({ error: `khong tai duoc file tu url: ${err.message}` });
-      }
-      if (!fetchRes.ok) {
-        return res.status(422).json({ error: `khong tai duoc file tu url: status ${fetchRes.status}` });
-      }
-
-      const buffer = Buffer.from(await fetchRes.arrayBuffer());
-      if (buffer.length > MAX_DOCUMENT_BYTES) {
-        return res.status(413).json({ error: 'file qua lon (toi da 5MB)' });
-      }
-
-      const contentType = (fetchRes.headers.get('content-type') || '').split(';')[0].trim();
-      if (REJECTED_URL_CONTENT_TYPES[contentType]) {
-        return res.status(422).json({
-          error: `url tra ve mot trang web (${contentType}), khong phai file tai lieu. Link Google Drive dang xem truoc se khong hoat dong, can dung link tai truc tiep.`,
-        });
-      }
-      const filename = filenameFromUrl(url, contentType);
-
-      const result = await processDocumentBuffer({
-        tenantId: req.params.id,
-        filename,
-        mimetype: contentType,
-        buffer,
         llmClient,
         embeddingClient,
         vectorStore,

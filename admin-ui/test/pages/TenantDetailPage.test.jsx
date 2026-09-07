@@ -25,7 +25,6 @@ function makeBackendClient(overrides = {}) {
     listDocuments: vi.fn().mockResolvedValue([]),
     updateSystemPrompt: vi.fn().mockResolvedValue({ ok: true }),
     uploadDocument: vi.fn().mockResolvedValue({ docId: 'menu.md_1', chunkCount: 2 }),
-    uploadDocumentFromUrl: vi.fn().mockResolvedValue({ docId: 'menu.md_1', chunkCount: 2 }),
     deleteDocument: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   };
@@ -97,36 +96,16 @@ test('uploads a file selected via the file input and refreshes the document list
   expect(await screen.findByText(/menu\.md/)).toBeInTheDocument();
 });
 
-test('uploads a document from a pasted url and refreshes the document list', async () => {
-  const user = userEvent.setup();
-  const listDocuments = vi
-    .fn()
-    .mockResolvedValueOnce([])
-    .mockResolvedValueOnce([{ id: 'd1', filename: 'menu.md', chunkCount: 2, createdAt: '2026-01-01' }]);
-  const uploadDocumentFromUrl = vi.fn().mockResolvedValue({ docId: 'd1', chunkCount: 2 });
-  const backendClient = makeBackendClient({ listDocuments, uploadDocumentFromUrl });
+test('uploads a pdf file selected via the file input', async () => {
+  const backendClient = makeBackendClient();
   renderPage(backendClient, makeBridgeClient());
 
   await screen.findByText('Truc Lam Vien');
-  await user.type(screen.getByLabelText('Hoặc dán link tải trực tiếp'), 'https://example.com/menu.md');
-  await user.click(screen.getByRole('button', { name: 'Tải từ URL' }));
+  const file = new File(['%PDF-1.4'], 'menu.pdf', { type: 'application/pdf' });
+  const input = document.querySelector('input[type="file"]');
+  fireEvent.change(input, { target: { files: [file] } });
 
-  expect(uploadDocumentFromUrl).toHaveBeenCalledWith('t1', 'https://example.com/menu.md');
-  expect(await screen.findByText(/menu\.md/)).toBeInTheDocument();
-});
-
-test('shows an error when uploading from a url fails', async () => {
-  const user = userEvent.setup();
-  const backendClient = makeBackendClient({
-    uploadDocumentFromUrl: vi.fn().mockRejectedValue(new Error('khong tai duoc file')),
-  });
-  renderPage(backendClient, makeBridgeClient());
-
-  await screen.findByText('Truc Lam Vien');
-  await user.type(screen.getByLabelText('Hoặc dán link tải trực tiếp'), 'https://example.com/bad');
-  await user.click(screen.getByRole('button', { name: 'Tải từ URL' }));
-
-  expect(await screen.findByText('khong tai duoc file')).toBeInTheDocument();
+  await waitFor(() => expect(backendClient.uploadDocument).toHaveBeenCalledWith('t1', file));
 });
 
 test('rejects an unsupported file extension without calling the upload API', async () => {

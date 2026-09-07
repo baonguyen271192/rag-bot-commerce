@@ -12,7 +12,6 @@ function makeApp({
   embedTexts = null,
   completeCalls = null,
   llmClientOverride = null,
-  fetchImplOverride = null,
 } = {}) {
   const tenantStore = new TenantStore(':memory:');
   const vectorStore = {
@@ -47,7 +46,6 @@ function makeApp({
     embeddingClient,
     ragService,
     llmClient,
-    ...(fetchImplOverride ? { fetchImpl: fetchImplOverride } : {}),
   });
   return { app, tenantStore, vectorStore, embeddingClient };
 }
@@ -239,147 +237,36 @@ test('POST /tenants/:id/documents returns 422 when the vision LLM extracts no us
   assert.equal(res.status, 422);
 });
 
-test('POST /tenants/:id/documents/from-url fetches, chunks, and indexes a text document', async () => {
+test('POST /tenants/:id/documents extracts text from an uploaded PDF and indexes it', async () => {
+  const { PDFDocument, StandardFonts } = require('pdf-lib');
+  const pdfDoc = await PDFDocument.create();
+  const page = pdfDoc.addPage();
+  const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+  page.drawText('Pho bo - 65000', { x: 50, y: 700, size: 24, font });
+  const pdfBytes = await pdfDoc.save();
+
   const embedTexts = [];
-  const fetchImplOverride = async (url) => {
-    assert.equal(url, 'https://example.com/menu.md');
-    return {
-      ok: true,
-      status: 200,
-      headers: { get: (name) => (name.toLowerCase() === 'content-type' ? 'text/markdown' : null) },
-      arrayBuffer: async () => new TextEncoder().encode('## Menu\nPho bo - 65000\n').buffer,
-    };
-  };
-  const { app } = makeApp({ embedTexts, fetchImplOverride });
+  const { app } = makeApp({ embedTexts });
   await request(app).post('/tenants').send({ id: 't1', name: 'A', systemPrompt: 'p' });
 
   const res = await request(app)
-    .post('/tenants/t1/documents/from-url')
-    .send({ url: 'https://example.com/menu.md' });
+    .post('/tenants/t1/documents')
+    .attach('file', Buffer.from(pdfBytes), { filename: 'menu.pdf', contentType: 'application/pdf' });
 
   assert.equal(res.status, 201);
   assert.ok(embedTexts.length >= 1);
   assert.match(embedTexts[0], /Pho bo/);
-
-  const listRes = await request(app).get('/tenants/t1/documents');
-  assert.equal(listRes.body[0].filename, 'menu.md');
 });
 
-test('POST /tenants/:id/documents/from-url returns 404 for an unknown tenant', async () => {
-  const { app } = makeApp();
-  const res = await request(app)
-    .post('/tenants/unknown/documents/from-url')
-    .send({ url: 'https://example.com/a.md' });
-  assert.equal(res.status, 404);
-});
-
-test('POST /tenants/:id/documents/from-url returns 400 when url is missing', async () => {
+test('POST /tenants/:id/documents returns 422 for a PDF with no extractable text', async () => {
   const { app } = makeApp();
   await request(app).post('/tenants').send({ id: 't1', name: 'A', systemPrompt: 'p' });
-  const res = await request(app).post('/tenants/t1/documents/from-url').send({});
-  assert.equal(res.status, 400);
-});
-
-test('POST /tenants/:id/documents/from-url returns 422 when the fetch itself fails', async () => {
-  const fetchImplOverride = async () => {
-    throw new Error('network down');
-  };
-  const { app } = makeApp({ fetchImplOverride });
-  await request(app).post('/tenants').send({ id: 't1', name: 'A', systemPrompt: 'p' });
-  const res = await request(app)
-    .post('/tenants/t1/documents/from-url')
-    .send({ url: 'https://example.com/a.md' });
-  assert.equal(res.status, 422);
-});
-
-test('POST /tenants/:id/documents/from-url returns 422 when the url responds with a non-ok status', async () => {
-  const fetchImplOverride = async () => ({ ok: false, status: 404 });
-  const { app } = makeApp({ fetchImplOverride });
-  await request(app).post('/tenants').send({ id: 't1', name: 'A', systemPrompt: 'p' });
-  const res = await request(app)
-    .post('/tenants/t1/documents/from-url')
-    .send({ url: 'https://example.com/missing.md' });
-  assert.equal(res.status, 422);
-});
-
-test('POST /tenants/:id/documents/from-url returns 413 when the downloaded file exceeds 5MB', async () => {
-  const fetchImplOverride = async () => ({
-    ok: true,
-    status: 200,
-    headers: { get: () => 'text/plain' },
-    arrayBuffer: async () => new ArrayBuffer(6 * 1024 * 1024),
-  });
-  const { app } = makeApp({ fetchImplOverride });
-  await request(app).post('/tenants').send({ id: 't1', name: 'A', systemPrompt: 'p' });
-  const res = await request(app)
-    .post('/tenants/t1/documents/from-url')
-    .send({ url: 'https://example.com/big.txt' });
-  assert.equal(res.status, 413);
-});
-
-test('POST /tenants/:id/documents/from-url extracts text from an image url via the vision LLM', async () => {
-  const embedTexts = [];
-  const visionCalls = [];
-  const fetchImplOverride = async () => ({
-    ok: true,
-    status: 200,
-    headers: { get: () => 'image/jpeg' },
-    arrayBuffer: async () => new Uint8Array([0xff, 0xd8, 0xff]).buffer,
-  });
-  const { app } = makeApp({
-    embedTexts,
-    fetchImplOverride,
-    llmClientOverride: {
-      complete: async (args) => {
-        visionCalls.push(args);
-        return 'Pho bo - 65000';
-      },
-    },
-  });
-  await request(app).post('/tenants').send({ id: 't1', name: 'A', systemPrompt: 'p' });
 
   const res = await request(app)
-    .post('/tenants/t1/documents/from-url')
-    .send({ url: 'https://example.com/menu.jpg' });
-
-  assert.equal(res.status, 201);
-  assert.equal(visionCalls.length, 1);
-  assert.match(visionCalls[0].messages[0].content[1].image_url.url, /^data:image\/jpeg;base64,/);
-  assert.match(embedTexts[0], /Pho bo/);
-});
-
-test('POST /tenants/:id/documents/from-url falls back to a generic filename when the url has no path segment', async () => {
-  const fetchImplOverride = async () => ({
-    ok: true,
-    status: 200,
-    headers: { get: () => 'text/plain' },
-    arrayBuffer: async () => new TextEncoder().encode('hello').buffer,
-  });
-  const { app } = makeApp({ fetchImplOverride });
-  await request(app).post('/tenants').send({ id: 't1', name: 'A', systemPrompt: 'p' });
-
-  await request(app).post('/tenants/t1/documents/from-url').send({ url: 'https://example.com/' });
-
-  const listRes = await request(app).get('/tenants/t1/documents');
-  assert.equal(listRes.body[0].filename, 'document.txt');
-});
-
-test('POST /tenants/:id/documents/from-url rejects a url that returns an HTML page instead of a document', async () => {
-  const fetchImplOverride = async () => ({
-    ok: true,
-    status: 200,
-    headers: { get: () => 'text/html; charset=UTF-8' },
-    arrayBuffer: async () => new TextEncoder().encode('<html>not a document</html>').buffer,
-  });
-  const { app } = makeApp({ fetchImplOverride });
-  await request(app).post('/tenants').send({ id: 't1', name: 'A', systemPrompt: 'p' });
-
-  const res = await request(app)
-    .post('/tenants/t1/documents/from-url')
-    .send({ url: 'https://drive.google.com/drive/folders/abc' });
+    .post('/tenants/t1/documents')
+    .attach('file', Buffer.from('%PDF-1.4 not a real pdf'), { filename: 'menu.pdf', contentType: 'application/pdf' });
 
   assert.equal(res.status, 422);
-  assert.match(res.body.error, /trang web/);
 });
 
 test('POST /tenants/:id/documents returns a clear 502 (not a generic 500) when the embedding call fails', async () => {
