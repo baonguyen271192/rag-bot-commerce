@@ -2,6 +2,9 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const os = require('node:os');
+const fs = require('node:fs');
+const path = require('node:path');
 const request = require('supertest');
 const { createApp } = require('../src/app');
 const { TenantStore } = require('../src/db');
@@ -13,6 +16,7 @@ function makeApp({
   completeCalls = null,
   llmClientOverride = null,
 } = {}) {
+  const documentsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'app-test-documents-'));
   const tenantStore = new TenantStore(':memory:');
   const vectorStore = {
     addedChunks: [],
@@ -46,8 +50,9 @@ function makeApp({
     embeddingClient,
     ragService,
     llmClient,
+    documentsDir,
   });
-  return { app, tenantStore, vectorStore, embeddingClient };
+  return { app, tenantStore, vectorStore, embeddingClient, documentsDir };
 }
 
 test('POST /tenants creates a tenant and GET /tenants lists it', async () => {
@@ -165,6 +170,23 @@ test('DELETE /tenants/:id/documents/:docId removes it from the vector store and 
   assert.deepEqual(vectorStore.deletedDocuments, [{ tenantId: 't1', docId }]);
 });
 
+test('DELETE /tenants/:id/documents/:docId also removes the stored image files for that document', async () => {
+  const { app, documentsDir } = makeApp({
+    llmClientOverride: { complete: async () => 'Pho bo - 65000' },
+  });
+  await request(app).post('/tenants').send({ id: 't1', name: 'A', systemPrompt: 'p' });
+  const uploadRes = await request(app)
+    .post('/tenants/t1/documents')
+    .attach('file', Buffer.from([0xff, 0xd8, 0xff]), { filename: 'menu.jpg', contentType: 'image/jpeg' });
+  const docId = uploadRes.body.docId;
+  const docDir = path.join(documentsDir, 't1', docId);
+  assert.equal(fs.existsSync(docDir), true, 'sanity check: the file should exist right after upload');
+
+  await request(app).delete(`/tenants/t1/documents/${docId}`);
+
+  assert.equal(fs.existsSync(docDir), false);
+});
+
 test('DELETE /tenants/:id/documents/:docId returns 404 for an unknown tenant', async () => {
   const { app } = makeApp();
   const res = await request(app).delete('/tenants/unknown/documents/some-doc');
@@ -237,14 +259,17 @@ test('POST /tenants/:id/documents returns 422 when the vision LLM extracts no us
   assert.equal(res.status, 422);
 });
 
-test('POST /tenants/:id/documents extracts text from an uploaded PDF and indexes it', async () => {
+async function makeRealPdfBuffer(text) {
   const { PDFDocument, StandardFonts } = require('pdf-lib');
   const pdfDoc = await PDFDocument.create();
   const page = pdfDoc.addPage();
   const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
-  page.drawText('Pho bo - 65000', { x: 50, y: 700, size: 24, font });
-  const pdfBytes = await pdfDoc.save();
+  page.drawText(text, { x: 50, y: 700, size: 24, font });
+  return Buffer.from(await pdfDoc.save());
+}
 
+test('POST /tenants/:id/documents extracts text from an uploaded PDF and indexes it', async () => {
+  const pdfBytes = await makeRealPdfBuffer('Pho bo - 65000');
   const embedTexts = [];
   const { app } = makeApp({ embedTexts });
   await request(app).post('/tenants').send({ id: 't1', name: 'A', systemPrompt: 'p' });
@@ -267,6 +292,74 @@ test('POST /tenants/:id/documents returns 422 for a PDF with no extractable text
     .attach('file', Buffer.from('%PDF-1.4 not a real pdf'), { filename: 'menu.pdf', contentType: 'application/pdf' });
 
   assert.equal(res.status, 422);
+});
+
+test('GET /tenants/:id/documents/:docId/image serves the original bytes for an uploaded image', async () => {
+  const { app } = makeApp({ llmClientOverride: { complete: async () => 'Pho bo - 65000' } });
+  await request(app).post('/tenants').send({ id: 't1', name: 'A', systemPrompt: 'p' });
+  const imageBytes = Buffer.from([0xff, 0xd8, 0xff, 0x01, 0x02]);
+  const uploadRes = await request(app)
+    .post('/tenants/t1/documents')
+    .attach('file', imageBytes, { filename: 'menu.jpg', contentType: 'image/jpeg' });
+
+  const res = await request(app).get(`/tenants/t1/documents/${uploadRes.body.docId}/image`);
+
+  assert.equal(res.status, 200);
+  assert.equal(res.headers['content-type'], 'image/jpeg');
+  assert.deepEqual(res.body, imageBytes);
+});
+
+test('GET /tenants/:id/documents/:docId/image serves the rendered page for an uploaded pdf', async () => {
+  const pdfBytes = await makeRealPdfBuffer('Pho bo - 65000');
+  const { app } = makeApp();
+  await request(app).post('/tenants').send({ id: 't1', name: 'A', systemPrompt: 'p' });
+  const uploadRes = await request(app)
+    .post('/tenants/t1/documents')
+    .attach('file', pdfBytes, { filename: 'menu.pdf', contentType: 'application/pdf' });
+
+  const res = await request(app).get(`/tenants/t1/documents/${uploadRes.body.docId}/image?page=1`);
+
+  assert.equal(res.status, 200);
+  assert.equal(res.headers['content-type'], 'image/png');
+  assert.ok(res.body.length > 0);
+});
+
+test('GET /tenants/:id/documents/:docId/image returns 400 for a pdf document when the page query param is missing', async () => {
+  const pdfBytes = await makeRealPdfBuffer('Pho bo - 65000');
+  const { app } = makeApp();
+  await request(app).post('/tenants').send({ id: 't1', name: 'A', systemPrompt: 'p' });
+  const uploadRes = await request(app)
+    .post('/tenants/t1/documents')
+    .attach('file', pdfBytes, { filename: 'menu.pdf', contentType: 'application/pdf' });
+
+  const res = await request(app).get(`/tenants/t1/documents/${uploadRes.body.docId}/image`);
+
+  assert.equal(res.status, 400);
+});
+
+test('GET /tenants/:id/documents/:docId/image returns 404 for a plain text document (no image to serve)', async () => {
+  const { app } = makeApp();
+  await request(app).post('/tenants').send({ id: 't1', name: 'A', systemPrompt: 'p' });
+  const uploadRes = await request(app)
+    .post('/tenants/t1/documents')
+    .attach('file', Buffer.from('## Menu\nPho bo\n'), 'menu.md');
+
+  const res = await request(app).get(`/tenants/t1/documents/${uploadRes.body.docId}/image`);
+
+  assert.equal(res.status, 404);
+});
+
+test('GET /tenants/:id/documents/:docId/image returns 404 when the docId belongs to a different tenant', async () => {
+  const { app } = makeApp({ llmClientOverride: { complete: async () => 'Pho bo - 65000' } });
+  await request(app).post('/tenants').send({ id: 't1', name: 'A', systemPrompt: 'p' });
+  await request(app).post('/tenants').send({ id: 't2', name: 'B', systemPrompt: 'p' });
+  const uploadRes = await request(app)
+    .post('/tenants/t1/documents')
+    .attach('file', Buffer.from([0xff, 0xd8, 0xff]), { filename: 'menu.jpg', contentType: 'image/jpeg' });
+
+  const res = await request(app).get(`/tenants/t2/documents/${uploadRes.body.docId}/image`);
+
+  assert.equal(res.status, 404);
 });
 
 test('POST /tenants/:id/documents returns a clear 413 (not a generic 500) when the file exceeds 20MB', async () => {
@@ -314,6 +407,25 @@ test('POST /tenants/:id/ask returns the RAG reply', async () => {
 
   assert.equal(res.status, 200);
   assert.equal(res.body.reply, 'Chao ban, gio mo cua la 7h-21h30.');
+  assert.equal(res.body.attachment, null);
+});
+
+test('POST /tenants/:id/ask includes an attachment when the top search match came from an uploaded pdf page', async () => {
+  const pdfBytes = await makeRealPdfBuffer('Com nieu - 20000');
+  const searchResults = [];
+  const { app } = makeApp({ llmReply: 'Com nieu gia 20.000d', searchResults });
+  await request(app).post('/tenants').send({ id: 't1', name: 'A', systemPrompt: 'p' });
+  const uploadRes = await request(app)
+    .post('/tenants/t1/documents')
+    .attach('file', pdfBytes, { filename: 'menu.pdf', contentType: 'application/pdf' });
+  searchResults.push({ text: 'Com nieu - 20000', score: 0.05, docId: uploadRes.body.docId, page: 1 });
+
+  const res = await request(app)
+    .post('/tenants/t1/ask')
+    .send({ conversationId: 'c1', text: 'com nieu gia bao nhieu' });
+
+  assert.equal(res.status, 200);
+  assert.deepEqual(res.body.attachment, { docId: uploadRes.body.docId, page: 1, mimetype: 'image/png' });
 });
 
 test('POST /tenants/:id/ask returns 404 for an unknown tenant', async () => {

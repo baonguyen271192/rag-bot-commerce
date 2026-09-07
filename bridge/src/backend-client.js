@@ -26,7 +26,19 @@ class BackendClient {
       throw new Error(`ask failed with status ${res.status}`);
     }
     const data = await res.json();
-    return data.reply;
+    return { reply: data.reply, attachment: data.attachment || null };
+  }
+
+  async downloadDocumentImage(tenantId, docId, page) {
+    const url = new URL(`${this.baseUrl}/tenants/${tenantId}/documents/${docId}/image`);
+    if (page) url.searchParams.set('page', page);
+    const res = await this.fetch(url.toString());
+    if (!res.ok) {
+      throw new Error(`downloadDocumentImage failed with status ${res.status}`);
+    }
+    const contentType = res.headers.get('content-type') || 'image/jpeg';
+    const buffer = Buffer.from(await res.arrayBuffer());
+    return { data: buffer, contentType };
   }
 }
 

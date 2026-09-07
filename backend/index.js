@@ -46,7 +46,9 @@ function main() {
   });
   const ragService = new RagService({ tenantStore, vectorStore, embeddingClient, llmClient });
 
-  const app = createApp({ tenantStore, vectorStore, embeddingClient, ragService, llmClient });
+  const documentsDir = process.env.DOCUMENTS_DIR || path.join(__dirname, 'data', 'documents');
+  fs.mkdirSync(documentsDir, { recursive: true });
+  const app = createApp({ tenantStore, vectorStore, embeddingClient, ragService, llmClient, documentsDir });
   const port = process.env.PORT || 4001;
   app.listen(port, () => {
     console.log(`backend: listening on port ${port} (embedding provider: ${embeddingProvider})`);

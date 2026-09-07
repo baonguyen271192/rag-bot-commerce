@@ -4,12 +4,13 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { RagService } = require('../src/rag');
 
-function makeFakes({ tenant, searchResults, llmReply, recentMessages = [] } = {}) {
+function makeFakes({ tenant, searchResults, llmReply, recentMessages = [], documents = {} } = {}) {
   const savedMessages = [];
   const tenantStore = {
     getTenant: () => tenant,
     addMessage: (msg) => savedMessages.push(msg),
     getRecentMessages: () => recentMessages,
+    getDocument: (docId) => documents[docId] || null,
   };
   const embedCalls = [];
   const embeddingClient = {
@@ -43,9 +44,10 @@ test('answer embeds the question, searches the tenant vector store, and asks the
   });
   const rag = new RagService(fakes);
 
-  const reply = await rag.answer({ tenantId: 't1', conversationId: 'c1', text: 'may gio mo cua?' });
+  const { reply, attachment } = await rag.answer({ tenantId: 't1', conversationId: 'c1', text: 'may gio mo cua?' });
 
   assert.equal(reply, 'Nha hang mo cua 7h-21h30.');
+  assert.equal(attachment, null);
   assert.deepEqual(fakes.embedCalls[0], ['may gio mo cua?']);
   assert.equal(fakes.searchCalls[0].tenantId, 't1');
   assert.deepEqual(fakes.searchCalls[0].embedding, [1, 0, 0]);
@@ -125,4 +127,60 @@ test('answer attaches the image to the current turn as vision content when provi
     { tenantId: 't1', conversationId: 'c1', role: 'user', text: 'day la mon gi?' },
     { tenantId: 't1', conversationId: 'c1', role: 'assistant', text: 'day la mon pho' },
   ]);
+});
+
+test('answer includes an attachment pointing at the top match\'s page when it came from a PDF', async () => {
+  const fakes = makeFakes({
+    tenant: { id: 't1', systemPrompt: 'p' },
+    searchResults: [{ text: 'Com nieu - 20000', score: 0.05, docId: 'menu.pdf_1', page: 3 }],
+    llmReply: 'Com nieu gia 20.000d',
+    documents: { 'menu.pdf_1': { id: 'menu.pdf_1', mimetype: 'application/pdf' } },
+  });
+  const rag = new RagService(fakes);
+
+  const { attachment } = await rag.answer({ tenantId: 't1', conversationId: 'c1', text: 'com nieu gia bao nhieu' });
+
+  assert.deepEqual(attachment, { docId: 'menu.pdf_1', page: 3, mimetype: 'image/png' });
+});
+
+test('answer includes an attachment with the original mimetype when the top match came from an uploaded image', async () => {
+  const fakes = makeFakes({
+    tenant: { id: 't1', systemPrompt: 'p' },
+    searchResults: [{ text: 'Pho bo - 65000', score: 0.05, docId: 'menu.jpg_1', page: 1 }],
+    llmReply: 'Pho bo gia 65.000d',
+    documents: { 'menu.jpg_1': { id: 'menu.jpg_1', mimetype: 'image/jpeg' } },
+  });
+  const rag = new RagService(fakes);
+
+  const { attachment } = await rag.answer({ tenantId: 't1', conversationId: 'c1', text: 'pho bo gia bao nhieu' });
+
+  assert.deepEqual(attachment, { docId: 'menu.jpg_1', page: 1, mimetype: 'image/jpeg' });
+});
+
+test('answer has no attachment when the top match has no page (plain text document)', async () => {
+  const fakes = makeFakes({
+    tenant: { id: 't1', systemPrompt: 'p' },
+    searchResults: [{ text: 'Gio mo cua: 7h-21h30', score: 0.05, docId: 'info.md_1', page: 0 }],
+    llmReply: 'Mo cua 7h-21h30',
+    documents: { 'info.md_1': { id: 'info.md_1', mimetype: 'text/markdown' } },
+  });
+  const rag = new RagService(fakes);
+
+  const { attachment } = await rag.answer({ tenantId: 't1', conversationId: 'c1', text: 'gio mo cua' });
+
+  assert.equal(attachment, null);
+});
+
+test('answer has no attachment when the top match\'s document was deleted after indexing', async () => {
+  const fakes = makeFakes({
+    tenant: { id: 't1', systemPrompt: 'p' },
+    searchResults: [{ text: 'stale chunk', score: 0.05, docId: 'deleted-doc', page: 2 }],
+    llmReply: 'ok',
+    documents: {},
+  });
+  const rag = new RagService(fakes);
+
+  const { attachment } = await rag.answer({ tenantId: 't1', conversationId: 'c1', text: 'hoi gi do' });
+
+  assert.equal(attachment, null);
 });

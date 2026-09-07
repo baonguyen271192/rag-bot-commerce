@@ -34,7 +34,7 @@ test('startTenantSession replies in-place to a DM', async () => {
   const backendClient = {
     ask: async (tenantId, args) => {
       askCalls.push({ tenantId, args });
-      return 'Chao ban!';
+      return { reply: 'Chao ban!', attachment: null };
     },
   };
 
@@ -54,9 +54,40 @@ test('startTenantSession replies in-place to a DM', async () => {
   assert.deepEqual(sentMessages, [{ text: 'Chao ban!', threadId: 'user-1', type: ThreadType.User }]);
 });
 
+test('startTenantSession sends the reply with the document image attached when the backend includes one', async () => {
+  const { api, handlers, sentMessages } = makeFakeApi();
+  const imageData = Buffer.from([1, 2, 3]);
+  const backendClient = {
+    ask: async () => ({
+      reply: 'Com nieu gia 20.000d',
+      attachment: { docId: 'menu.pdf_1', page: 3, mimetype: 'image/png' },
+    }),
+    downloadDocumentImage: async () => ({ data: imageData, contentType: 'image/png' }),
+  };
+
+  await startTenantSession({
+    tenantId: 't1',
+    backendClient,
+    credentialsPath: '/tmp/unused-creds.json',
+    qrPath: '/tmp/unused-qr.png',
+    onStatusChange: () => {},
+    createZaloApiImpl: async () => api,
+    ThreadType,
+  });
+
+  await handlers.message({ type: ThreadType.User, data: { content: 'com nieu gia bao nhieu', uidFrom: 'user-1' }, threadId: 'user-1' });
+
+  assert.equal(sentMessages.length, 1);
+  assert.deepEqual(sentMessages[0].text, {
+    msg: 'Com nieu gia 20.000d',
+    attachments: [{ data: imageData, filename: 'menu.png', metadata: { totalSize: 3 } }],
+  });
+  assert.equal(sentMessages[0].threadId, 'user-1');
+});
+
 test('startTenantSession replies into the group thread when mentioned', async () => {
   const { api, handlers, sentMessages } = makeFakeApi({ ownUid: 'bot-uid' });
-  const backendClient = { ask: async () => 'ok' };
+  const backendClient = { ask: async () => ({ reply: 'ok', attachment: null }) };
 
   await startTenantSession({
     tenantId: 't1',
@@ -79,7 +110,7 @@ test('startTenantSession replies into the group thread when mentioned', async ()
 
 test('startTenantSession ignores group messages that do not mention the bot', async () => {
   const { api, handlers, sentMessages } = makeFakeApi();
-  const backendClient = { ask: async () => 'should not be called' };
+  const backendClient = { ask: async () => ({ reply: 'should not be called', attachment: null }) };
 
   await startTenantSession({
     tenantId: 't1',
@@ -122,7 +153,7 @@ test('startTenantSession does not crash the process when the listener callback t
 
 test('startTenantSession catches a synchronous throw in message filtering and does not crash', async () => {
   const { api, handlers } = makeFakeApi();
-  const backendClient = { ask: async () => 'unused' };
+  const backendClient = { ask: async () => ({ reply: 'unused', attachment: null }) };
   const logged = [];
 
   await startTenantSession({
@@ -148,7 +179,7 @@ test('startTenantSession catches a synchronous throw in message filtering and do
 test('startTenantSession reports status error when the Zalo session closes unexpectedly', async () => {
   const { api, handlers } = makeFakeApi();
   const statusUpdates = [];
-  const backendClient = { ask: async () => 'unused' };
+  const backendClient = { ask: async () => ({ reply: 'unused', attachment: null }) };
 
   await startTenantSession({
     tenantId: 't1',
@@ -174,7 +205,7 @@ test('startTenantSession removes stale credentials and restarts the login flow a
   fs.writeFileSync(credentialsPath, '{"stale":true}');
   const { api, handlers } = makeFakeApi();
   const statusUpdates = [];
-  const backendClient = { ask: async () => 'unused' };
+  const backendClient = { ask: async () => ({ reply: 'unused', attachment: null }) };
   let createCalls = 0;
 
   await startTenantSession({
@@ -206,7 +237,7 @@ test('startTenantSession removes stale credentials and restarts the login flow a
 test('startTenantSession does not throw when there are no credentials to remove on close', async () => {
   const credentialsPath = path.join(os.tmpdir(), `bridge-test-creds-missing-${Date.now()}-${Math.random()}.json`);
   const { api, handlers } = makeFakeApi();
-  const backendClient = { ask: async () => 'unused' };
+  const backendClient = { ask: async () => ({ reply: 'unused', attachment: null }) };
 
   await startTenantSession({
     tenantId: 't1',
@@ -234,7 +265,7 @@ test('logout stops the listener, removes credentials, and restarts the login flo
 
   const { logout } = await startTenantSession({
     tenantId: 't1',
-    backendClient: { ask: async () => 'unused' },
+    backendClient: { ask: async () => ({ reply: 'unused', attachment: null }) },
     credentialsPath,
     qrPath: '/tmp/unused-qr.png',
     onStatusChange: () => {},
@@ -270,7 +301,7 @@ test('onSessionReady fires again with a fresh logout handle after a restart, not
 
   await startTenantSession({
     tenantId: 't1',
-    backendClient: { ask: async () => 'unused' },
+    backendClient: { ask: async () => ({ reply: 'unused', attachment: null }) },
     credentialsPath,
     qrPath: '/tmp/unused-qr.png',
     onStatusChange: () => {},

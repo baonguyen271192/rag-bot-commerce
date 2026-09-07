@@ -27,11 +27,19 @@ class TenantStore {
         tenant_id TEXT NOT NULL,
         filename TEXT NOT NULL,
         chunk_count INTEGER NOT NULL,
+        mimetype TEXT NOT NULL DEFAULT '',
         created_at TEXT NOT NULL
       );
       CREATE INDEX IF NOT EXISTS idx_documents_tenant
         ON documents (tenant_id, created_at);
     `);
+    // A database created before the mimetype column existed still has a documents
+    // table without it -- CREATE TABLE IF NOT EXISTS above is a no-op on an existing
+    // table, so the column has to be added explicitly here.
+    const documentColumns = this.db.prepare('PRAGMA table_info(documents)').all();
+    if (!documentColumns.some((c) => c.name === 'mimetype')) {
+      this.db.exec("ALTER TABLE documents ADD COLUMN mimetype TEXT NOT NULL DEFAULT ''");
+    }
   }
 
   createTenant({ id, name, systemPrompt }) {
@@ -74,10 +82,12 @@ class TenantStore {
     return rows.reverse();
   }
 
-  addDocument({ id, tenantId, filename, chunkCount }) {
+  addDocument({ id, tenantId, filename, chunkCount, mimetype = '' }) {
     this.db
-      .prepare('INSERT INTO documents (id, tenant_id, filename, chunk_count, created_at) VALUES (?, ?, ?, ?, ?)')
-      .run(id, tenantId, filename, chunkCount, new Date().toISOString());
+      .prepare(
+        'INSERT INTO documents (id, tenant_id, filename, chunk_count, mimetype, created_at) VALUES (?, ?, ?, ?, ?, ?)'
+      )
+      .run(id, tenantId, filename, chunkCount, mimetype, new Date().toISOString());
   }
 
   listDocuments(tenantId) {
@@ -88,6 +98,7 @@ class TenantStore {
       id: row.id,
       filename: row.filename,
       chunkCount: row.chunk_count,
+      mimetype: row.mimetype,
       createdAt: row.created_at,
     }));
   }
@@ -100,6 +111,7 @@ class TenantStore {
       tenantId: row.tenant_id,
       filename: row.filename,
       chunkCount: row.chunk_count,
+      mimetype: row.mimetype,
       createdAt: row.created_at,
     };
   }

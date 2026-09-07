@@ -43,9 +43,9 @@ test('ask POSTs conversationId, text, and image to /tenants/:id/ask and returns 
     }),
   });
 
-  const reply = await client.ask('t1', { conversationId: 'c1', text: 'hi', image: 'data:image/png;base64,AAA=' });
+  const result = await client.ask('t1', { conversationId: 'c1', text: 'hi', image: 'data:image/png;base64,AAA=' });
 
-  assert.equal(reply, 'Chao ban!');
+  assert.deepEqual(result, { reply: 'Chao ban!', attachment: null });
   assert.equal(calls[0].url, 'http://backend.local/tenants/t1/ask');
   assert.equal(calls[0].opts.method, 'POST');
   assert.deepEqual(JSON.parse(calls[0].opts.body), {
@@ -100,4 +100,66 @@ test('ask throws a clear error on a non-ok response', async () => {
   });
 
   await assert.rejects(() => client.ask('missing', { conversationId: 'c1', text: 'hi' }), /ask failed with status 404/);
+});
+
+test('ask passes the attachment through when the backend includes one', async () => {
+  const client = new BackendClient({
+    baseUrl: 'http://backend.local',
+    fetchImpl: fakeFetch(async () => ({
+      ok: true,
+      json: async () => ({ reply: 'Com nieu gia 20.000d', attachment: { docId: 'menu.pdf_1', page: 3, mimetype: 'image/png' } }),
+    })),
+  });
+
+  const result = await client.ask('t1', { conversationId: 'c1', text: 'com nieu gia bao nhieu' });
+
+  assert.deepEqual(result.attachment, { docId: 'menu.pdf_1', page: 3, mimetype: 'image/png' });
+});
+
+test('downloadDocumentImage GETs the tenant document image endpoint with the page query param', async () => {
+  const calls = [];
+  const client = new BackendClient({
+    baseUrl: 'http://backend.local',
+    fetchImpl: fakeFetch(async (url) => {
+      calls.push(url);
+      return {
+        ok: true,
+        headers: { get: () => 'image/png' },
+        arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer,
+      };
+    }),
+  });
+
+  const result = await client.downloadDocumentImage('t1', 'menu.pdf_1', 3);
+
+  assert.equal(calls[0], 'http://backend.local/tenants/t1/documents/menu.pdf_1/image?page=3');
+  assert.equal(result.contentType, 'image/png');
+  assert.deepEqual(result.data, Buffer.from([1, 2, 3]));
+});
+
+test('downloadDocumentImage omits the page query param when not provided', async () => {
+  const calls = [];
+  const client = new BackendClient({
+    baseUrl: 'http://backend.local',
+    fetchImpl: fakeFetch(async (url) => {
+      calls.push(url);
+      return { ok: true, headers: { get: () => 'image/jpeg' }, arrayBuffer: async () => new ArrayBuffer(0) };
+    }),
+  });
+
+  await client.downloadDocumentImage('t1', 'menu.jpg_1', null);
+
+  assert.equal(calls[0], 'http://backend.local/tenants/t1/documents/menu.jpg_1/image');
+});
+
+test('downloadDocumentImage throws a clear error on a non-ok response', async () => {
+  const client = new BackendClient({
+    baseUrl: 'http://backend.local',
+    fetchImpl: fakeFetch(async () => ({ ok: false, status: 404 })),
+  });
+
+  await assert.rejects(
+    () => client.downloadDocumentImage('t1', 'missing-doc', null),
+    /downloadDocumentImage failed with status 404/
+  );
 });

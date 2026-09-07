@@ -46,7 +46,19 @@ class RagService {
     this.tenantStore.addMessage({ tenantId, conversationId, role: 'user', text });
     this.tenantStore.addMessage({ tenantId, conversationId, role: 'assistant', text: reply });
 
-    return reply;
+    return { reply, attachment: this._attachmentFor(matches[0]) };
+  }
+
+  // The single best-matching chunk points back at the original image/PDF page it came
+  // from (page > 0), if any -- that's the one image worth sending back with the reply.
+  // A page-tagged chunk whose document was deleted after indexing (stale vector row) is
+  // treated the same as no attachment, rather than sending a broken reference.
+  _attachmentFor(topMatch) {
+    if (!topMatch || !topMatch.page) return null;
+    const doc = this.tenantStore.getDocument(topMatch.docId);
+    if (!doc) return null;
+    const mimetype = doc.mimetype === 'application/pdf' ? 'image/png' : doc.mimetype;
+    return { docId: topMatch.docId, page: topMatch.page, mimetype };
   }
 }
 

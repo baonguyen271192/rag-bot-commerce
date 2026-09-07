@@ -2,6 +2,9 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const os = require('node:os');
+const fs = require('node:fs');
+const path = require('node:path');
 const { TenantStore } = require('../src/db');
 
 test('creates and retrieves a tenant', () => {
@@ -102,6 +105,48 @@ test('getDocument returns the document with its tenantId, or null if missing', (
   assert.equal(doc.tenantId, 't1');
   assert.equal(doc.filename, 'a.md');
   assert.equal(store.getDocument('missing'), null);
+  store.close();
+});
+
+test('addDocument stores the mimetype, retrievable via getDocument and listDocuments', () => {
+  const store = new TenantStore(':memory:');
+  store.createTenant({ id: 't1', name: 'A', systemPrompt: 'p' });
+  store.addDocument({ id: 'doc1', tenantId: 't1', filename: 'menu.pdf', chunkCount: 3, mimetype: 'application/pdf' });
+
+  assert.equal(store.getDocument('doc1').mimetype, 'application/pdf');
+  assert.equal(store.listDocuments('t1')[0].mimetype, 'application/pdf');
+  store.close();
+});
+
+test('opening a database created before the mimetype column existed migrates it automatically', () => {
+  const Database = require('better-sqlite3');
+  const dbPath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'db-migration-test-')), 'tenants.db');
+  const rawDb = new Database(dbPath);
+  rawDb.exec(`
+    CREATE TABLE documents (
+      id TEXT PRIMARY KEY,
+      tenant_id TEXT NOT NULL,
+      filename TEXT NOT NULL,
+      chunk_count INTEGER NOT NULL,
+      created_at TEXT NOT NULL
+    );
+  `);
+  rawDb.close();
+
+  const store = new TenantStore(dbPath);
+  store.createTenant({ id: 't1', name: 'A', systemPrompt: 'p' });
+  store.addDocument({ id: 'doc1', tenantId: 't1', filename: 'menu.pdf', chunkCount: 3, mimetype: 'application/pdf' });
+
+  assert.equal(store.getDocument('doc1').mimetype, 'application/pdf');
+  store.close();
+});
+
+test('addDocument defaults mimetype to an empty string when omitted', () => {
+  const store = new TenantStore(':memory:');
+  store.createTenant({ id: 't1', name: 'A', systemPrompt: 'p' });
+  store.addDocument({ id: 'doc1', tenantId: 't1', filename: 'a.md', chunkCount: 1 });
+
+  assert.equal(store.getDocument('doc1').mimetype, '');
   store.close();
 });
 

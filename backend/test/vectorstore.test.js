@@ -27,6 +27,39 @@ test('adds chunks for a tenant and finds the closest match by search', async () 
   await store.close();
 });
 
+test('search results include the docId and page each chunk was tagged with', async () => {
+  const store = new VectorStore({ dbPath: tempDbPath() });
+  await store.addChunks('t1', [
+    { text: 'from a pdf page', embedding: [1, 0], docId: 'doc1', page: 3 },
+    { text: 'from plain text, no page', embedding: [0, 1], docId: 'doc2' },
+  ]);
+
+  const results = await store.search('t1', [1, 0], 5);
+  const pdfResult = results.find((r) => r.text === 'from a pdf page');
+  const textResult = results.find((r) => r.text === 'from plain text, no page');
+
+  assert.deepEqual({ docId: pdfResult.docId, page: pdfResult.page }, { docId: 'doc1', page: 3 });
+  assert.deepEqual({ docId: textResult.docId, page: textResult.page }, { docId: 'doc2', page: 0 });
+  await store.close();
+});
+
+test('addChunks migrates a table created before the page column existed, instead of failing', async () => {
+  const dbPath = tempDbPath();
+  // Simulate a table from before this feature: no `page` field at all.
+  const lancedb = require('@lancedb/lancedb');
+  const db = await lancedb.connect(dbPath);
+  await db.createTable('tenant_t1', [{ id: 'old_1', text: 'old chunk, no page column', vector: [1, 0, 0], docId: 'doc1' }]);
+
+  const store = new VectorStore({ dbPath });
+  await store.addChunks('t1', [{ text: 'new chunk with a page', embedding: [0, 1, 0], docId: 'doc2', page: 2 }]);
+
+  const results = await store.search('t1', [0, 1, 0], 5);
+  const newResult = results.find((r) => r.text === 'new chunk with a page');
+  assert.equal(newResult.page, 2);
+  assert.equal(typeof newResult.page, 'number', 'page must be a plain number, not a BigInt (JSON.stringify cannot serialize BigInt)');
+  await store.close();
+});
+
 test('keeps different tenants isolated', async () => {
   const store = new VectorStore({ dbPath: tempDbPath() });
   await store.addChunks('t1', [{ text: 'tenant one data', embedding: [1, 0], docId: 'd1' }]);

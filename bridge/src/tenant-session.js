@@ -4,6 +4,19 @@ const fs = require('node:fs');
 const { createZaloApi } = require('./zalo-session');
 const { shouldHandleMessage, extractMessageContent, handleIncomingMessage } = require('./message-handler');
 
+const IMAGE_EXTENSION_BY_CONTENT_TYPE = { 'image/png': '.png', 'image/jpeg': '.jpg' };
+
+function buildSendMessageArg(replyText, imageAttachment) {
+  if (!imageAttachment) return replyText;
+  const ext = IMAGE_EXTENSION_BY_CONTENT_TYPE[imageAttachment.contentType] || '.jpg';
+  return {
+    msg: replyText,
+    attachments: [
+      { data: imageAttachment.data, filename: `menu${ext}`, metadata: { totalSize: imageAttachment.data.length } },
+    ],
+  };
+}
+
 async function startTenantSession({
   tenantId,
   backendClient,
@@ -59,7 +72,8 @@ async function startTenantSession({
         conversationId,
         text,
         image,
-        sendReply: (replyText) => api.sendMessage(replyText, conversationId, message.type),
+        sendReply: (replyText, imageAttachment) =>
+          api.sendMessage(buildSendMessageArg(replyText, imageAttachment), conversationId, message.type),
         logger,
       });
     } catch (err) {
