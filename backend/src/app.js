@@ -196,6 +196,9 @@ function createApp({ tenantStore, vectorStore, embeddingClient, ragService, llmC
   });
 
   app.use((err, req, res, next) => {
+    if (err instanceof multer.MulterError && err.code === 'LIMIT_FILE_SIZE') {
+      return res.status(413).json({ error: 'file qua lon (toi da 5MB)' });
+    }
     console.error('backend: unhandled route error', err);
     res.status(500).json({ error: 'internal error' });
   });
