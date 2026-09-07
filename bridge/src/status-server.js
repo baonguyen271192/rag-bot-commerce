@@ -20,6 +20,9 @@ function createStatusServer({ statusRegistry, dataDir }) {
     if (status.status === 'awaiting_qr' && status.qrPath) {
       return res.json({ status: status.status, qrUrl: `/tenants/${req.params.id}/qr.png` });
     }
+    if (status.status === 'error') {
+      return res.json({ status: status.status, error: status.error });
+    }
     res.json({ status: status.status });
   });
 

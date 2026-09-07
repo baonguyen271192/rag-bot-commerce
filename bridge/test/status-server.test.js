@@ -63,6 +63,16 @@ test('GET /tenants/:id/qr-status returns a qrUrl when awaiting a scan', async ()
   assert.deepEqual(res.body, { status: 'awaiting_qr', qrUrl: '/tenants/t1/qr.png' });
 });
 
+test('GET /tenants/:id/qr-status includes the real error reason for an error status', async () => {
+  const statusRegistry = new Map([['t1', { status: 'error', error: 'KICKOUT_BY_WORKER' }]]);
+  const app = createStatusServer({ statusRegistry, dataDir: makeDataDir() });
+
+  const res = await request(app).get('/tenants/t1/qr-status');
+
+  assert.equal(res.status, 200);
+  assert.deepEqual(res.body, { status: 'error', error: 'KICKOUT_BY_WORKER' });
+});
+
 test('GET /tenants/:id/qr.png serves the current QR file', async () => {
   const dataDir = makeDataDir();
   fs.mkdirSync(path.join(dataDir, 't1'), { recursive: true });
