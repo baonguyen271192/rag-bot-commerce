@@ -27,4 +27,38 @@ class EmbeddingClient {
   }
 }
 
-module.exports = { EmbeddingClient };
+class GeminiEmbeddingClient {
+  constructor({ apiKey, model = 'gemini-embedding-001', fetchImpl = fetch }) {
+    this.apiKey = apiKey;
+    this.model = model;
+    this.fetch = fetchImpl;
+  }
+
+  async embed(texts) {
+    if (texts.length === 0) return [];
+    const res = await this.fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${this.model}:batchEmbedContents`,
+      {
+        method: 'POST',
+        headers: {
+          'x-goog-api-key': this.apiKey,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          requests: texts.map((text) => ({
+            model: `models/${this.model}`,
+            content: { parts: [{ text }] },
+          })),
+        }),
+      }
+    );
+    if (!res.ok) {
+      const detail = res.text ? await res.text() : '';
+      throw new Error(`Gemini embeddings request failed with status ${res.status}: ${detail}`);
+    }
+    const data = await res.json();
+    return data.embeddings.map((item) => item.values);
+  }
+}
+
+module.exports = { EmbeddingClient, GeminiEmbeddingClient };
