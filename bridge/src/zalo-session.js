@@ -5,6 +5,9 @@ const path = require('node:path');
 const { Zalo } = require('zca-js');
 
 async function createZaloApi({ credentialsPath, qrPath, logger = console, onStatusChange = () => {} }) {
+  fs.mkdirSync(path.dirname(credentialsPath), { recursive: true });
+  fs.mkdirSync(path.dirname(qrPath), { recursive: true });
+
   const zalo = new Zalo();
   let credentials = null;
   if (fs.existsSync(credentialsPath)) {
