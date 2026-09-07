@@ -30,6 +30,7 @@ OPENAI_API_KEY=... OPENROUTER_API_KEY=... node index.js
 - `GET /tenants/:id` → chi tiết 1 tenant
 - `PUT /tenants/:id` `{systemPrompt}` → sửa persona
 - `POST /tenants/:id/documents` (multipart, field `file`) → upload + index tài liệu. `.md`/`.txt`: đọc trực tiếp. `.jpg`/`.png`: trích xuất nội dung qua vision LLM trước khi index (tối đa 5MB, trả `422` nếu không đọc được ảnh)
+- `POST /tenants/:id/documents/from-url` `{url}` → tải file từ 1 URL tải trực tiếp bất kỳ rồi xử lý y hệt upload thủ công (tên file lấy từ URL, tối đa 5MB, `413` nếu quá lớn, `422` nếu tải lỗi). **Không hỗ trợ link chia sẻ Google Drive dạng xem trước** (`drive.google.com/file/d/.../view`) — cần chuyển sang link tải trực tiếp trước.
 - `GET /tenants/:id/documents` → danh sách tài liệu đã upload (`{id, filename, chunkCount, createdAt}[]`)
 - `DELETE /tenants/:id/documents/:docId` → xoá tài liệu khỏi LanceDB và khỏi danh sách
 - `POST /tenants/:id/ask` `{conversationId, text, image?}` → `{reply}` (`image`: base64 data URI `data:image/jpeg;base64,...` hoặc `data:image/png;base64,...`, tuỳ chọn — chỉ dùng cho lượt trả lời này, không lưu vào kho tài liệu)

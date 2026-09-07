@@ -5,16 +5,88 @@ const multer = require('multer');
 const cors = require('cors');
 const { chunkText } = require('./chunker');
 
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
+const MAX_DOCUMENT_BYTES = 5 * 1024 * 1024;
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: MAX_DOCUMENT_BYTES } });
 
 const IMAGE_DATA_URI_RE = /^data:image\/(jpeg|png);base64,/;
 const IMAGE_MIMETYPES = { 'image/jpeg': true, 'image/png': true };
+const EXTENSION_BY_MIMETYPE = {
+  'text/markdown': '.md',
+  'text/plain': '.txt',
+  'image/jpeg': '.jpg',
+  'image/png': '.png',
+};
 const VISION_EXTRACT_SYSTEM_PROMPT =
   'Ban la cong cu trich xuat noi dung tai lieu tu anh. Doc toan bo chu va thong tin trong anh ' +
   '(ten mon, gia, mo ta, ghi chu...) va chep lai chinh xac, day du thanh van ban thuan. ' +
   'Khong dinh dang markdown, khong them binh luan hay giai thich.';
 
-function createApp({ tenantStore, vectorStore, embeddingClient, ragService, llmClient }) {
+class DocumentProcessingError extends Error {
+  constructor(status, message) {
+    super(message);
+    this.status = status;
+  }
+}
+
+async function processDocumentBuffer({
+  tenantId,
+  filename,
+  mimetype,
+  buffer,
+  llmClient,
+  embeddingClient,
+  vectorStore,
+  tenantStore,
+}) {
+  const docId = `${filename}_${Date.now()}`;
+  let text;
+  if (IMAGE_MIMETYPES[mimetype]) {
+    const dataUri = `data:${mimetype};base64,${buffer.toString('base64')}`;
+    try {
+      text = await llmClient.complete({
+        systemPrompt: VISION_EXTRACT_SYSTEM_PROMPT,
+        messages: [
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: 'Trich xuat noi dung anh nay.' },
+              { type: 'image_url', image_url: { url: dataUri } },
+            ],
+          },
+        ],
+      });
+    } catch (err) {
+      throw new DocumentProcessingError(422, `khong the doc noi dung anh: ${err.message}`);
+    }
+    if (!text || !text.trim()) {
+      throw new DocumentProcessingError(422, 'anh khong co noi dung doc duoc');
+    }
+  } else {
+    text = buffer.toString('utf8');
+  }
+
+  const chunks = chunkText(text);
+  const embeddings = await embeddingClient.embed(chunks);
+  await vectorStore.addChunks(
+    tenantId,
+    chunks.map((chunkContent, i) => ({ text: chunkContent, embedding: embeddings[i], docId }))
+  );
+  tenantStore.addDocument({ id: docId, tenantId, filename, chunkCount: chunks.length });
+  return { docId, chunkCount: chunks.length };
+}
+
+function filenameFromUrl(url, contentType) {
+  try {
+    const { pathname } = new URL(url);
+    const last = decodeURIComponent(pathname.split('/').filter(Boolean).pop() || '');
+    if (last) return last;
+  } catch {
+    // fall through to a generic name below
+  }
+  return `document${EXTENSION_BY_MIMETYPE[contentType] || ''}`;
+}
+
+function createApp({ tenantStore, vectorStore, embeddingClient, ragService, llmClient, fetchImpl = fetch }) {
   const app = express();
   app.use(cors());
   app.use(express.json({ limit: '10mb' }));
@@ -52,42 +124,64 @@ function createApp({ tenantStore, vectorStore, embeddingClient, ragService, llmC
       const tenant = tenantStore.getTenant(req.params.id);
       if (!tenant) return res.status(404).json({ error: 'tenant not found' });
 
-      const docId = `${req.file.originalname}_${Date.now()}`;
-      let text;
-      if (IMAGE_MIMETYPES[req.file.mimetype]) {
-        const dataUri = `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`;
-        try {
-          text = await llmClient.complete({
-            systemPrompt: VISION_EXTRACT_SYSTEM_PROMPT,
-            messages: [
-              {
-                role: 'user',
-                content: [
-                  { type: 'text', text: 'Trich xuat noi dung anh nay.' },
-                  { type: 'image_url', image_url: { url: dataUri } },
-                ],
-              },
-            ],
-          });
-        } catch (err) {
-          return res.status(422).json({ error: `khong the doc noi dung anh: ${err.message}` });
-        }
-        if (!text || !text.trim()) {
-          return res.status(422).json({ error: 'anh khong co noi dung doc duoc' });
-        }
-      } else {
-        text = req.file.buffer.toString('utf8');
+      const result = await processDocumentBuffer({
+        tenantId: req.params.id,
+        filename: req.file.originalname,
+        mimetype: req.file.mimetype,
+        buffer: req.file.buffer,
+        llmClient,
+        embeddingClient,
+        vectorStore,
+        tenantStore,
+      });
+      res.status(201).json(result);
+    } catch (err) {
+      if (err instanceof DocumentProcessingError) return res.status(err.status).json({ error: err.message });
+      next(err);
+    }
+  });
+
+  app.post('/tenants/:id/documents/from-url', async (req, res, next) => {
+    try {
+      const tenant = tenantStore.getTenant(req.params.id);
+      if (!tenant) return res.status(404).json({ error: 'tenant not found' });
+
+      const { url } = req.body;
+      if (!url || typeof url !== 'string') {
+        return res.status(400).json({ error: 'url is required' });
       }
 
-      const chunks = chunkText(text);
-      const embeddings = await embeddingClient.embed(chunks);
-      await vectorStore.addChunks(
-        req.params.id,
-        chunks.map((text, i) => ({ text, embedding: embeddings[i], docId }))
-      );
-      tenantStore.addDocument({ id: docId, tenantId: req.params.id, filename: req.file.originalname, chunkCount: chunks.length });
-      res.status(201).json({ docId, chunkCount: chunks.length });
+      let fetchRes;
+      try {
+        fetchRes = await fetchImpl(url);
+      } catch (err) {
+        return res.status(422).json({ error: `khong tai duoc file tu url: ${err.message}` });
+      }
+      if (!fetchRes.ok) {
+        return res.status(422).json({ error: `khong tai duoc file tu url: status ${fetchRes.status}` });
+      }
+
+      const buffer = Buffer.from(await fetchRes.arrayBuffer());
+      if (buffer.length > MAX_DOCUMENT_BYTES) {
+        return res.status(413).json({ error: 'file qua lon (toi da 5MB)' });
+      }
+
+      const contentType = (fetchRes.headers.get('content-type') || '').split(';')[0].trim();
+      const filename = filenameFromUrl(url, contentType);
+
+      const result = await processDocumentBuffer({
+        tenantId: req.params.id,
+        filename,
+        mimetype: contentType,
+        buffer,
+        llmClient,
+        embeddingClient,
+        vectorStore,
+        tenantStore,
+      });
+      res.status(201).json(result);
     } catch (err) {
+      if (err instanceof DocumentProcessingError) return res.status(err.status).json({ error: err.message });
       next(err);
     }
   });
