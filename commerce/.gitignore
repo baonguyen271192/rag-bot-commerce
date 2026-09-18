@@ -2,7 +2,7 @@
 __pycache__/
 *.pyc
 .env
-app/orders.db
+orders.db
 app/stores_config.json
 admin/node_modules/
 static/admin/
