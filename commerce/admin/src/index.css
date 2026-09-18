@@ -1,0 +1,169 @@
+@import "tailwindcss";
+
+/* Biến thể Tailwind "dark:" gắn theo thuộc tính data-theme (không dùng media query
+   mặc định của Tailwind) — để nút bấm trong AppShell luôn thắng, kể cả khi OS đặt
+   prefers-color-scheme khác đi. */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+/* ── Semantic color tokens ──────────────────────────────────────────────────
+   Khai báo qua @theme để Tailwind v4 sinh sẵn các utility (bg-app, text-fg,
+   border-line…) tham chiếu trực tiếp tới custom property — đổi giá trị biến ở
+   dưới (theo data-theme) sẽ tự động đổi màu MỌI utility đã sinh, không cần
+   build lại. Giá trị trong @theme là mặc định (tối), vì app này vốn dark-only. */
+@theme {
+  --color-app: #08090d;
+  --color-surface: #12141b;
+  --color-surface2: #0a0b10;
+  --color-fg: #f5f6fa;
+  --color-fg2: #a6a8b3;
+  --color-fg3: #6f7180;
+  --color-line: rgba(255, 255, 255, 0.08);
+  --color-line-strong: rgba(255, 255, 255, 0.14);
+}
+
+:root {
+  color-scheme: dark;
+}
+
+/* Người dùng đã CHỌN sáng (bấm nút, lưu localStorage) → thắng mọi thứ khác. */
+:root[data-theme="light"] {
+  color-scheme: light;
+  --color-app: #f6f7fb;
+  --color-surface: #ffffff;
+  --color-surface2: #eef1f6;
+  --color-fg: #14161c;
+  --color-fg2: #5b5f6b;
+  --color-fg3: #8b8e99;
+  --color-line: rgba(15, 17, 23, 0.1);
+  --color-line-strong: rgba(15, 17, 23, 0.16);
+}
+
+/* Chưa từng chọn (chưa có data-theme) → theo prefers-color-scheme của OS. */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme]) {
+    color-scheme: light;
+    --color-app: #f6f7fb;
+    --color-surface: #ffffff;
+    --color-surface2: #eef1f6;
+    --color-fg: #14161c;
+    --color-fg2: #5b5f6b;
+    --color-fg3: #8b8e99;
+    --color-line: rgba(15, 17, 23, 0.1);
+    --color-line-strong: rgba(15, 17, 23, 0.16);
+  }
+}
+
+/* Người dùng đã CHỌN tối → khôi phục đúng giá trị tối, thắng cả 2 nhánh trên. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --color-app: #08090d;
+  --color-surface: #12141b;
+  --color-surface2: #0a0b10;
+  --color-fg: #f5f6fa;
+  --color-fg2: #a6a8b3;
+  --color-fg3: #6f7180;
+  --color-line: rgba(255, 255, 255, 0.08);
+  --color-line-strong: rgba(255, 255, 255, 0.14);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  background: var(--color-app);
+  color: var(--color-fg);
+  font-family: -apple-system, "Inter", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  transition: background-color 0.15s, color 0.15s;
+}
+
+::selection {
+  background: rgba(129, 140, 248, 0.35);
+}
+
+/* @layer components: để utility Tailwind (vd border-amber-500/25, bg-amber-500/[0.04])
+   ghi đè được border/background của các class dưới đây khi kết hợp trên cùng 1 element.
+   Không có @layer, class thường (không-layer) LUÔN thắng utility có-layer bất kể thứ tự
+   viết — mọi override "card border-x" sẽ âm thầm vô hiệu. Xem .bangiao/thay-doi.md. */
+@layer components {
+  .input {
+    width: 100%;
+    border-radius: 0.625rem;
+    border: 1px solid var(--color-line);
+    background: color-mix(in srgb, var(--color-fg) 4%, transparent);
+    padding: 0.6rem 0.8rem;
+    font-size: 0.875rem;
+    color: var(--color-fg);
+    outline: none;
+    transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+  }
+
+  .input:focus {
+    border-color: rgba(129, 140, 248, 0.6);
+    background: color-mix(in srgb, var(--color-fg) 6%, transparent);
+    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+  }
+
+  .input::placeholder {
+    color: var(--color-fg3);
+  }
+
+  .card {
+    border-radius: 1rem;
+    border: 1px solid var(--color-line);
+    background: var(--color-surface);
+    box-shadow: 0 1px 0 var(--color-line) inset, 0 8px 24px -12px rgba(0, 0, 0, 0.5);
+  }
+
+  .btn-primary {
+    border-radius: 0.625rem;
+    background: linear-gradient(135deg, #6366f1, #8b5cf6);
+    color: white;
+    font-weight: 500;
+    transition: filter 0.15s, transform 0.1s;
+    box-shadow: 0 4px 16px -4px rgba(99, 102, 241, 0.5);
+  }
+
+  .btn-primary:hover {
+    filter: brightness(1.08);
+  }
+
+  .btn-primary:active {
+    transform: scale(0.98);
+  }
+
+  .btn-primary:disabled {
+    filter: grayscale(0.3);
+    opacity: 0.6;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background: color-mix(in srgb, var(--color-fg) 15%, transparent);
+    border-radius: 999px;
+  }
+}
+
+/* Con trỏ tay cho phần tử bấm được (Tailwind v4 không còn tự set trên <button>). */
+button:not(:disabled),
+[role="switch"]:not(:disabled) {
+  cursor: pointer;
+}
+
+/* Tôn trọng người dùng bật "giảm chuyển động" của hệ điều hành. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

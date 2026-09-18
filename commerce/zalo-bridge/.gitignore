@@ -3,5 +3,3 @@ data/
 .env
 *.log
 qr.png
-.claude/settings.local.json
-.DS_Store

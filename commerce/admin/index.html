@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Commerce Admin — Quản lý Bot</title>
+    <script>
+      // Đặt data-theme TRƯỚC khi CSS được áp dụng để tránh nháy sáng/tối (FOUC).
+      // Logic đầy đủ (đọc/ghi localStorage) nằm ở src/lib/theme.js — đoạn này chỉ
+      // đọc lại để sơn đúng theme ngay từ đầu, không ghi gì cả.
+      (function () {
+        try {
+          var saved = localStorage.getItem('commerce-admin-theme');
+          var theme =
+            saved === 'light' || saved === 'dark'
+              ? saved
+              : window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches
+                ? 'light'
+                : 'dark';
+          document.documentElement.setAttribute('data-theme', theme);
+        } catch (e) {
+          document.documentElement.setAttribute('data-theme', 'dark');
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>

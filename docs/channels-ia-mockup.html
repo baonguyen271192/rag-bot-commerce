@@ -1,0 +1,472 @@
+<style>
+  :root {
+    color-scheme: dark;
+    --ground: #08090d;
+    --ground-2: #0a0b10;
+    --surface: linear-gradient(180deg, rgba(255,255,255,.035), rgba(255,255,255,.015));
+    --surface-solid: #12141b;
+    --border: rgba(255,255,255,.08);
+    --border-strong: rgba(255,255,255,.14);
+    --indigo: #6366f1;
+    --violet: #8b5cf6;
+    --tx-1: rgba(255,255,255,.95);
+    --tx-2: rgba(255,255,255,.62);
+    --tx-3: rgba(255,255,255,.45);
+    --emerald: #34d399;
+    --amber: #fbbf24;
+    --rose: #fb7185;
+    --sky: #38bdf8;
+    --radius: 16px;
+    font-family: -apple-system, "Inter", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+
+  * { box-sizing: border-box; }
+
+  .frame {
+    min-height: 100vh;
+    background: var(--ground);
+    background-image:
+      radial-gradient(circle at 12% 8%, rgba(99,102,241,.12), transparent 40%),
+      radial-gradient(circle at 88% 92%, rgba(139,92,246,.10), transparent 42%);
+    color: var(--tx-1);
+    display: flex;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  ::selection { background: rgba(129,140,248,.35); }
+
+  /* ── Sidebar ─────────────────────────────────── */
+  .side {
+    width: 264px;
+    flex: 0 0 264px;
+    border-right: 1px solid var(--border);
+    background: rgba(10,11,16,.8);
+    backdrop-filter: blur(18px);
+    padding: 22px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    position: sticky;
+    top: 0;
+    height: 100vh;
+  }
+  .brand {
+    display: flex; align-items: center; gap: 10px;
+    padding: 0 8px; margin-bottom: 22px;
+  }
+  .brand .logo {
+    width: 38px; height: 38px; border-radius: 12px;
+    background: linear-gradient(135deg, var(--indigo), var(--violet));
+    display: grid; place-items: center;
+    box-shadow: 0 6px 18px -6px rgba(99,102,241,.6);
+  }
+  .brand .logo svg { width: 20px; height: 20px; stroke: #fff; }
+  .brand h1 { font-size: 14px; font-weight: 650; margin: 0; letter-spacing: -.01em; }
+  .brand p { font-size: 11.5px; color: var(--tx-2); margin: 2px 0 0; }
+
+  .navlabel {
+    font-size: 10.5px; text-transform: uppercase; letter-spacing: .09em;
+    color: var(--tx-3); font-weight: 600;
+    padding: 14px 10px 6px;
+  }
+
+  .navitem {
+    display: flex; align-items: center; gap: 10px;
+    padding: 9px 10px; border-radius: 10px;
+    font-size: 13.5px; font-weight: 500; color: var(--tx-2);
+    cursor: pointer; border: none; background: none; width: 100%;
+    text-align: left; transition: background .14s, color .14s;
+    font-family: inherit;
+  }
+  .navitem svg { width: 17px; height: 17px; stroke: currentColor; flex: 0 0 17px; }
+  .navitem:hover { background: rgba(255,255,255,.04); color: var(--tx-1); }
+  .navitem.active { background: rgba(255,255,255,.07); color: #fff; }
+  .navitem .badge {
+    margin-left: auto; font-size: 10.5px; font-weight: 600;
+    background: rgba(99,102,241,.2); color: #c7d2fe;
+    padding: 1px 7px; border-radius: 999px; font-variant-numeric: tabular-nums;
+  }
+  .navitem .chev { margin-left: auto; width: 15px; height: 15px; transition: transform .18s; }
+  .group.open .navitem.parent .chev { transform: rotate(90deg); }
+
+  .subnav {
+    display: none; flex-direction: column; gap: 2px;
+    margin: 2px 0 2px 16px; padding-left: 12px;
+    border-left: 1px solid var(--border);
+  }
+  .group.open .subnav { display: flex; }
+  .subitem {
+    display: flex; align-items: center; gap: 9px;
+    padding: 8px 10px; border-radius: 9px;
+    font-size: 13px; font-weight: 500; color: var(--tx-2);
+    cursor: pointer; border: none; background: none; width: 100%;
+    text-align: left; transition: background .14s, color .14s; font-family: inherit;
+  }
+  .subitem .dot { width: 6px; height: 6px; border-radius: 999px; background: currentColor; opacity: .5; }
+  .subitem:hover { background: rgba(255,255,255,.04); color: var(--tx-1); }
+  .subitem.active { background: rgba(255,255,255,.07); color: #fff; }
+  .subitem.active .dot { opacity: 1; }
+  .subitem .badge {
+    margin-left: auto; font-size: 10px; font-weight: 600;
+    padding: 1px 6px; border-radius: 999px; font-variant-numeric: tabular-nums;
+  }
+  .badge.emerald { background: rgba(52,211,153,.15); color: var(--emerald); }
+  .badge.amber { background: rgba(251,191,36,.15); color: var(--amber); }
+  .badge.sky { background: rgba(56,189,248,.15); color: var(--sky); }
+  .badge.muted { background: rgba(255,255,255,.08); color: var(--tx-3); }
+
+  .side .foot {
+    margin-top: auto;
+    display: flex; align-items: center; gap: 8px;
+    border: 1px solid var(--border); border-radius: 10px;
+    background: rgba(255,255,255,.02);
+    padding: 10px 11px; font-size: 11.5px; color: var(--tx-2);
+  }
+  .side .foot svg { width: 15px; height: 15px; stroke: currentColor; flex: 0 0 15px; }
+
+  /* ── Main ────────────────────────────────────── */
+  .main { flex: 1; min-width: 0; }
+  .canvas { max-width: 980px; margin: 0 auto; padding: 34px 40px 80px; }
+
+  .pagehead { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 26px; }
+  .pagehead .eyebrow { display: flex; align-items: center; gap: 9px; margin-bottom: 6px; }
+  .pagehead .eyebrow .chip {
+    width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center;
+  }
+  .pagehead .eyebrow .chip svg { width: 18px; height: 18px; stroke: #fff; }
+  .pagehead h2 { font-size: 23px; font-weight: 650; margin: 0; letter-spacing: -.02em; }
+  .pagehead p { font-size: 13.5px; color: var(--tx-2); margin: 5px 0 0; max-width: 62ch; }
+
+  .btn {
+    display: inline-flex; align-items: center; gap: 7px;
+    background: linear-gradient(135deg, var(--indigo), var(--violet));
+    color: #fff; border: none; border-radius: 10px;
+    padding: 10px 15px; font-size: 13px; font-weight: 550; cursor: pointer;
+    box-shadow: 0 4px 16px -4px rgba(99,102,241,.5); font-family: inherit;
+    white-space: nowrap;
+  }
+  .btn svg { width: 15px; height: 15px; stroke: #fff; }
+  .btn.ghost { background: none; box-shadow: none; border: 1px solid var(--border-strong); color: var(--tx-1); }
+
+  .kpis { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 22px; }
+  .kpi { border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); padding: 18px; display: flex; gap: 14px; align-items: center; }
+  .kpi .ico { width: 46px; height: 46px; border-radius: 13px; display: grid; place-items: center; flex: 0 0 46px; }
+  .kpi .ico svg { width: 21px; height: 21px; stroke: currentColor; }
+  .kpi .num { font-size: 27px; font-weight: 650; letter-spacing: -.02em; line-height: 1; font-variant-numeric: tabular-nums; }
+  .kpi .lab { font-size: 13px; font-weight: 500; color: var(--tx-2); margin-top: 4px; }
+  .kpi .sub { font-size: 11.5px; color: var(--tx-3); margin-top: 2px; }
+
+  .tint-indigo { background: rgba(99,102,241,.15); color: #a5b4fc; }
+  .tint-emerald { background: rgba(52,211,153,.15); color: var(--emerald); }
+  .tint-violet { background: rgba(139,92,246,.15); color: #c4b5fd; }
+  .tint-amber { background: rgba(251,191,36,.15); color: var(--amber); }
+  .tint-sky { background: rgba(56,189,248,.15); color: var(--sky); }
+
+  .panelcard { border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); overflow: hidden; }
+  .panelcard .cardhead { display: flex; align-items: center; justify-content: space-between; padding: 15px 18px; border-bottom: 1px solid var(--border); }
+  .panelcard .cardhead h3 { font-size: 13.5px; font-weight: 600; margin: 0; }
+  .panelcard .cardhead .hint { font-size: 12px; color: var(--tx-3); }
+
+  .tablewrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 560px; }
+  thead th { text-align: left; font-weight: 500; color: var(--tx-3); font-size: 11.5px; text-transform: uppercase; letter-spacing: .05em; padding: 11px 18px; background: var(--surface-solid); }
+  tbody td { padding: 13px 18px; border-top: 1px solid rgba(255,255,255,.05); color: var(--tx-1); vertical-align: middle; }
+  tbody tr:hover { background: rgba(255,255,255,.02); }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .store-cell { display: flex; align-items: center; gap: 11px; }
+  .store-cell .av { width: 34px; height: 34px; border-radius: 9px; background: rgba(255,255,255,.06); display: grid; place-items: center; color: var(--tx-2); flex: 0 0 34px; }
+  .store-cell .av svg { width: 17px; height: 17px; stroke: currentColor; }
+  .store-cell .nm { font-weight: 550; }
+  .store-cell .ty { font-size: 11.5px; color: var(--tx-3); }
+  .mono { font-variant-numeric: tabular-nums; color: var(--tx-2); font-size: 12.5px; }
+
+  .pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; font-size: 11.5px; font-weight: 550; }
+  .pill .d { width: 6px; height: 6px; border-radius: 999px; }
+  .pill.on { background: rgba(52,211,153,.12); color: var(--emerald); }
+  .pill.on .d { background: var(--emerald); box-shadow: 0 0 6px 1px rgba(52,211,153,.5); }
+  .pill.off { background: rgba(251,191,36,.12); color: var(--amber); }
+  .pill.off .d { background: var(--amber); }
+  .pill.muted { background: rgba(255,255,255,.06); color: var(--tx-3); }
+  .pill.muted .d { background: var(--tx-3); }
+
+  .rowbtn { border: 1px solid var(--border-strong); background: none; color: var(--tx-1); border-radius: 8px; padding: 6px 12px; font-size: 12px; font-weight: 500; cursor: pointer; font-family: inherit; white-space: nowrap; }
+  .rowbtn:hover { background: rgba(255,255,255,.05); }
+  .rowbtn.primary { border-color: transparent; background: rgba(99,102,241,.9); color: #fff; }
+
+  .notice { display: flex; gap: 10px; align-items: flex-start; border-radius: 12px; padding: 13px 15px; font-size: 12.5px; line-height: 1.5; margin-bottom: 18px; }
+  .notice svg { width: 16px; height: 16px; flex: 0 0 16px; margin-top: 1px; stroke: currentColor; }
+  .notice.amber { border: 1px solid rgba(251,191,36,.28); background: rgba(251,191,36,.08); color: #fcd34d; }
+  .notice.sky { border: 1px solid rgba(56,189,248,.24); background: rgba(56,189,248,.08); color: #bae6fd; }
+  .notice strong { color: #fff; font-weight: 600; }
+
+  .page { display: none; }
+  .page.show { display: block; animation: fade .22s ease; }
+  @keyframes fade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+  @media (prefers-reduced-motion: reduce) { .page.show { animation: none; } * { transition: none !important; } }
+
+  /* BA annotations */
+  .ba { display: none; margin-top: 26px; border: 1px dashed rgba(139,92,246,.4); border-radius: 14px; background: rgba(139,92,246,.06); padding: 18px 20px; }
+  .ba.show { display: block; }
+  .ba h4 { margin: 0 0 4px; font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: #c4b5fd; }
+  .ba ul { margin: 8px 0 0; padding-left: 18px; font-size: 13px; color: var(--tx-2); line-height: 1.7; }
+  .ba ul strong { color: var(--tx-1); font-weight: 600; }
+
+  .topbar { display: flex; justify-content: flex-end; padding: 14px 40px 0; max-width: 980px; margin: 0 auto; }
+  .toggle-ba { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; color: var(--tx-2); background: none; border: 1px solid var(--border); border-radius: 999px; padding: 6px 13px; cursor: pointer; font-family: inherit; }
+  .toggle-ba svg { width: 14px; height: 14px; stroke: currentColor; }
+  .toggle-ba.on { color: #c4b5fd; border-color: rgba(139,92,246,.5); background: rgba(139,92,246,.1); }
+
+  @media (max-width: 820px) {
+    .side { display: none; }
+    .kpis { grid-template-columns: 1fr; }
+    .canvas { padding: 24px 18px 60px; }
+    .topbar { padding: 14px 18px 0; }
+  }
+</style>
+
+<div class="frame">
+  <!-- ══ SIDEBAR ══ -->
+  <aside class="side">
+    <div class="brand">
+      <span class="logo">
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4Z"/><path d="M3 6h18"/><path d="M16 10a4 4 0 0 1-8 0"/></svg>
+      </span>
+      <div>
+        <h1>Commerce Admin</h1>
+        <p>Quản lý bot đa cửa hàng</p>
+      </div>
+    </div>
+
+    <div class="navlabel">Tổng quan</div>
+    <button class="navitem active" data-view="overview">
+      <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+      Tổng quan
+    </button>
+    <button class="navitem" data-view="stores">
+      <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9 4 4h16l1 5"/><path d="M4 9v10a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1V9"/><path d="M4 9a2.5 2.5 0 0 0 5 0 2.5 2.5 0 0 0 5 0 2.5 2.5 0 0 0 5 0"/></svg>
+      Cửa hàng
+      <span class="badge">3</span>
+    </button>
+
+    <div class="navlabel">Kênh</div>
+    <button class="navitem" data-view="ch-fb">
+      <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 9V7a2 2 0 0 1 2-2h2"/><path d="M10 22V12H7V9h3V8a4 4 0 0 1 4-4"/><path d="M14 12h3l.5-3H14"/><path d="M10 22h4V12"/></svg>
+      Facebook
+      <span class="badge amber" title="1 đã kết nối / 3 cửa hàng">1/3</span>
+    </button>
+
+    <div class="group" id="zaloGroup">
+      <button class="navitem parent" id="zaloParent">
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-8.5 8.5 8.5 8.5 0 0 1-3.8-.9L3 21l1.9-5.7A8.38 8.38 0 0 1 4 11.5 8.5 8.5 0 0 1 12.5 3 8.38 8.38 0 0 1 21 11.5Z"/></svg>
+        Zalo
+        <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+      </button>
+      <div class="subnav">
+        <button class="subitem" data-view="ch-zca">
+          <span class="dot"></span> Zalo cá nhân
+          <span class="badge amber" title="1 phiên đang chạy / 3 cửa hàng">1/3</span>
+        </button>
+        <button class="subitem" data-view="ch-oa">
+          <span class="dot"></span> Zalo OA
+          <span class="badge muted" title="0 đã kết nối / 3 cửa hàng · đang Beta">0/3</span>
+        </button>
+      </div>
+    </div>
+
+    <div class="foot">
+      <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9 4 4h16l1 5"/><path d="M4 9v10a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1V9"/></svg>
+      Bot đặt đơn đa cửa hàng, đa ngành
+    </div>
+  </aside>
+
+  <!-- ══ MAIN ══ -->
+  <div class="main">
+    <div class="topbar">
+      <button class="toggle-ba" id="baToggle">
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+        Ghi chú BA
+      </button>
+    </div>
+    <div class="canvas">
+
+      <!-- ── OVERVIEW (giữ nguyên, chỉ minh hoạ) ── -->
+      <section class="page show" data-page="overview">
+        <div class="pagehead">
+          <div>
+            <h2>Tổng quan</h2>
+            <p>Quản lý bot đặt đơn cho tất cả cửa hàng.</p>
+          </div>
+          <button class="btn"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>Tạo cửa hàng</button>
+        </div>
+        <div class="kpis">
+          <div class="kpi"><span class="ico tint-indigo"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4Z"/><path d="M16 10a4 4 0 0 1-8 0"/></svg></span><div><div class="num">3</div><div class="lab">Cửa hàng</div><div class="sub">3 đang hoạt động</div></div></div>
+          <div class="kpi"><span class="ico tint-emerald"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13a10 10 0 0 1 14 0"/><path d="M8.5 16.5a5 5 0 0 1 7 0"/><path d="M2 8.8a15 15 0 0 1 20 0"/><path d="M12 20h.01"/></svg></span><div><div class="num">3</div><div class="lab">Kênh đã kết nối</div><div class="sub">FB 1 · Zalo cá nhân 1 · OA 0</div></div></div>
+          <div class="kpi"><span class="ico tint-violet"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16v4H4z"/><path d="M4 8v12h16V8"/><path d="M9 13h6"/></svg></span><div><div class="num">10</div><div class="lab">Tổng đơn qua bot</div><div class="sub">Nhiều nhất: Giày BQ (5)</div></div></div>
+        </div>
+        <div class="notice sky">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+          <span>Đây là trang cũ, giữ nguyên. Thiết kế mới bổ sung nhóm <strong>Kênh</strong> ở sidebar — bấm <strong>Facebook</strong> hoặc mở <strong>Zalo</strong> bên trái để xem trang tổng hợp theo kênh.</span>
+        </div>
+      </section>
+
+      <!-- ── STORES ── -->
+      <section class="page" data-page="stores">
+        <div class="pagehead">
+          <div>
+            <h2>Cửa hàng</h2>
+            <p>Danh sách tất cả cửa hàng. Bấm vào từng cửa hàng để cấu hình kênh, menu và xem đơn.</p>
+          </div>
+          <button class="btn"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>Tạo cửa hàng</button>
+        </div>
+        <div class="panelcard">
+          <div class="cardhead"><h3>3 cửa hàng</h3><span class="hint">Kênh cấu hình trong từng cửa hàng</span></div>
+          <div class="tablewrap">
+            <table>
+              <thead><tr><th>Cửa hàng</th><th>Kênh đang bật</th><th class="num">Món</th><th class="num">Đơn</th><th></th></tr></thead>
+              <tbody>
+                <tr><td><div class="store-cell"><span class="av"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h3l1-9 2 3h4l2-3 1 9h3"/><path d="M5 11 4 4"/><path d="m19 11 1-7"/></svg></span><div><div class="nm">Giày BQ (demo)</div><div class="ty">Giày/Dép</div></div></div></td><td><span class="pill on"><span class="d"></span>FB</span> <span class="pill on"><span class="d"></span>Zalo CN</span></td><td class="num">626</td><td class="num">5</td><td class="num"><button class="rowbtn">Mở</button></td></tr>
+                <tr><td><div class="store-cell"><span class="av"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h3l1-9 2 3h4l2-3 1 9h3"/><path d="M5 11 4 4"/><path d="m19 11 1-7"/></svg></span><div><div class="nm">Giày Nam Phong Cách</div><div class="ty">Giày/Dép</div></div></div></td><td><span class="pill muted"><span class="d"></span>Chưa bật kênh</span></td><td class="num">220</td><td class="num">0</td><td class="num"><button class="rowbtn">Mở</button></td></tr>
+                <tr><td><div class="store-cell"><span class="av"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h16v3a5 5 0 0 1-5 5H9a5 5 0 0 1-5-5Z"/><path d="M8 4v2M12 3v3M16 4v2"/></svg></span><div><div class="nm">Cháo Nghêu O Hoèn</div><div class="ty">Ăn uống</div></div></div></td><td><span class="pill on"><span class="d"></span>Zalo CN</span></td><td class="num">11</td><td class="num">5</td><td class="num"><button class="rowbtn">Mở</button></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── KÊNH FACEBOOK ── -->
+      <section class="page" data-page="ch-fb">
+        <div class="pagehead">
+          <div>
+            <div class="eyebrow"><span class="chip tint-indigo" style="background:rgba(24,119,242,.18);color:#60a5fa"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 9V7a2 2 0 0 1 2-2h2"/><path d="M10 22V12H7V9h3V8a4 4 0 0 1 4-4"/></svg></span></div>
+            <h2>Kênh Facebook</h2>
+            <p>Tổng hợp trạng thái kết nối Fanpage của mọi cửa hàng. Nhấn “Cấu hình” để chỉnh Page ID / token trong từng cửa hàng.</p>
+          </div>
+          <button class="btn ghost">Hướng dẫn kết nối</button>
+        </div>
+        <div class="kpis">
+          <div class="kpi"><span class="ico tint-emerald"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></span><div><div class="num">1</div><div class="lab">Đã kết nối</div><div class="sub">trên 3 cửa hàng</div></div></div>
+          <div class="kpi"><span class="ico tint-amber"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/></svg></span><div><div class="num">2</div><div class="lab">Chưa kết nối</div><div class="sub">cần điền token</div></div></div>
+          <div class="kpi"><span class="ico tint-violet"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16v4H4zM4 8v12h16V8"/></svg></span><div><div class="num">5</div><div class="lab">Đơn qua Messenger</div><div class="sub">30 ngày gần đây</div></div></div>
+        </div>
+        <div class="panelcard">
+          <div class="cardhead"><h3>Cửa hàng dùng Facebook</h3><span class="hint">Token che, chỉ hiện đã/chưa có</span></div>
+          <div class="tablewrap">
+            <table>
+              <thead><tr><th>Cửa hàng</th><th>Trạng thái</th><th>Page ID</th><th class="num">Đơn</th><th></th></tr></thead>
+              <tbody>
+                <tr><td><div class="store-cell"><span class="av"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h3l1-9 2 3h4l2-3 1 9h3"/></svg></span><div><div class="nm">Giày BQ (demo)</div><div class="ty">Giày/Dép</div></div></div></td><td><span class="pill on"><span class="d"></span>Đã kết nối</span></td><td class="mono">110194••••27</td><td class="num">5</td><td class="num"><button class="rowbtn">Cấu hình</button></td></tr>
+                <tr><td><div class="store-cell"><span class="av"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h3l1-9 2 3h4l2-3 1 9h3"/></svg></span><div><div class="nm">Giày Nam Phong Cách</div><div class="ty">Giày/Dép</div></div></div></td><td><span class="pill off"><span class="d"></span>Chưa kết nối</span></td><td class="mono">—</td><td class="num">0</td><td class="num"><button class="rowbtn primary">Kết nối</button></td></tr>
+                <tr><td><div class="store-cell"><span class="av"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h16v3a5 5 0 0 1-5 5H9a5 5 0 0 1-5-5Z"/><path d="M8 4v2M12 3v3M16 4v2"/></svg></span><div><div class="nm">Cháo Nghêu O Hoèn</div><div class="ty">Ăn uống</div></div></div></td><td><span class="pill off"><span class="d"></span>Chưa kết nối</span></td><td class="mono">—</td><td class="num">0</td><td class="num"><button class="rowbtn primary">Kết nối</button></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── ZALO CÁ NHÂN ── -->
+      <section class="page" data-page="ch-zca">
+        <div class="pagehead">
+          <div>
+            <div class="eyebrow"><span class="chip tint-sky" style="background:rgba(56,189,248,.16)"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="3"/><path d="M11 18h2"/></svg></span></div>
+            <h2>Zalo cá nhân</h2>
+            <p>Dùng tài khoản Zalo cá nhân qua bridge riêng. Đăng nhập (quét QR) &amp; phiên nằm ở service <code>zalo-bridge</code>, không lưu tại đây.</p>
+          </div>
+          <div style="display:flex;gap:10px;flex-wrap:wrap">
+            <button class="btn ghost">Mở QR đăng nhập</button>
+            <button class="btn"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/><path d="M3 21v-5h5"/></svg>Khởi động lại Bridge</button>
+          </div>
+        </div>
+        <div class="notice sky">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/><path d="M3 21v-5h5"/></svg>
+          <span>Sau khi bật kênh cho một cửa hàng, nhấn <strong>Khởi động lại Bridge</strong> ở trên để bridge nhận cửa hàng mới — không cần vào server gõ lệnh tay. <em style="color:var(--tx-3);font-style:normal">Định hướng: bridge tự lắng nghe sự kiện để không phải restart thủ công.</em></span>
+        </div>
+        <div class="kpis">
+          <div class="kpi"><span class="ico tint-sky"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></span><div><div class="num">1</div><div class="lab">Phiên đang chạy</div><div class="sub">1 cửa hàng đã bật</div></div></div>
+          <div class="kpi"><span class="ico tint-violet"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16v4H4zM4 8v12h16V8"/></svg></span><div><div class="num">5</div><div class="lab">Đơn qua Zalo cá nhân</div><div class="sub">30 ngày gần đây</div></div></div>
+          <div class="kpi"><span class="ico tint-amber"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8v4l3 2"/><circle cx="12" cy="12" r="9"/></svg></span><div><div class="num">0</div><div class="lab">Cần đăng nhập lại</div><div class="sub">phiên hết hạn</div></div></div>
+        </div>
+        <div class="panelcard">
+          <div class="cardhead"><h3>Cửa hàng dùng Zalo cá nhân</h3><span class="hint">1 cửa hàng = 1 tài khoản Zalo</span></div>
+          <div class="tablewrap">
+            <table>
+              <thead><tr><th>Cửa hàng</th><th>Trạng thái phiên</th><th>Tài khoản</th><th class="num">Đơn</th><th></th></tr></thead>
+              <tbody>
+                <tr><td><div class="store-cell"><span class="av"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h16v3a5 5 0 0 1-5 5H9a5 5 0 0 1-5-5Z"/><path d="M8 4v2M12 3v3M16 4v2"/></svg></span><div><div class="nm">Cháo Nghêu O Hoèn</div><div class="ty">Ăn uống</div></div></div></td><td><span class="pill on"><span class="d"></span>Đã đăng nhập</span></td><td class="mono">O Hoèn · 09••••321</td><td class="num">5</td><td class="num"><button class="rowbtn">Xem QR</button></td></tr>
+                <tr><td><div class="store-cell"><span class="av"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h3l1-9 2 3h4l2-3 1 9h3"/></svg></span><div><div class="nm">Giày BQ (demo)</div><div class="ty">Giày/Dép</div></div></div></td><td><span class="pill muted"><span class="d"></span>Đã bật · chờ QR</span></td><td class="mono">—</td><td class="num">0</td><td class="num"><button class="rowbtn primary">Quét QR</button></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── ZALO OA ── -->
+      <section class="page" data-page="ch-oa">
+        <div class="pagehead">
+          <div>
+            <div class="eyebrow"><span class="chip tint-amber"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-8.5 8.5 8.5 8.5 0 0 1-3.8-.9L3 21l1.9-5.7A8.38 8.38 0 0 1 4 11.5 8.5 8.5 0 0 1 12.5 3 8.38 8.38 0 0 1 21 11.5Z"/></svg></span></div>
+            <h2>Zalo OA <span style="font-size:12px;font-weight:600;color:var(--amber);border:1px solid rgba(251,191,36,.3);border-radius:999px;padding:2px 9px;vertical-align:middle;margin-left:6px">Beta</span></h2>
+            <p>Kênh Official Account chính thức của Zalo. Đang chờ tài liệu API — phần này là khung, chưa gửi/nhận tin thật.</p>
+          </div>
+          <button class="btn ghost">Tài liệu</button>
+        </div>
+        <div class="notice amber">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/></svg>
+          <span><strong>Chưa xác minh:</strong> tên trường, webhook và cơ chế token là tạm đặt, chưa khớp API Zalo OA thật. Webhook hiện chỉ định tuyến rồi bỏ qua. Đừng dùng ở production tới khi có tài liệu chính thức.</span>
+        </div>
+        <div class="kpis">
+          <div class="kpi"><span class="ico tint-amber"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8v4l3 2"/><circle cx="12" cy="12" r="9"/></svg></span><div><div class="num">0</div><div class="lab">OA đã kết nối</div><div class="sub">chờ tài liệu API</div></div></div>
+          <div class="kpi"><span class="ico tint-indigo"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="m7 14 4-4 3 3 5-6"/></svg></span><div><div class="num">—</div><div class="lab">Đơn qua OA</div><div class="sub">chưa khả dụng</div></div></div>
+          <div class="kpi"><span class="ico tint-violet"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></span><div><div class="num">4</div><div class="lab">Trường cấu hình</div><div class="sub">OA ID · secret · token ×2</div></div></div>
+        </div>
+        <div class="panelcard">
+          <div class="cardhead"><h3>Cửa hàng dùng Zalo OA</h3><span class="hint">Khung — bật để lưu cấu hình trước</span></div>
+          <div class="tablewrap">
+            <table>
+              <thead><tr><th>Cửa hàng</th><th>Trạng thái</th><th>OA ID</th><th class="num">Đơn</th><th></th></tr></thead>
+              <tbody>
+                <tr><td colspan="5" style="text-align:center;color:var(--tx-3);padding:34px 18px">Chưa cửa hàng nào bật Zalo OA. <button class="rowbtn" style="margin-left:8px">Chọn cửa hàng để bật</button></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- BA ANNOTATIONS -->
+      <div class="ba" id="baPanel">
+        <h4>Ghi chú BA — vì sao thiết kế thế này</h4>
+        <ul>
+          <li><strong>Nhóm “Kênh” tách khỏi “Cửa hàng”:</strong> người vận hành thường làm việc theo 2 trục — theo cửa hàng (menu/đơn) và theo kênh (kết nối/sự cố). Sidebar phản ánh đúng 2 trục đó, sidebar không còn trống.</li>
+          <li><strong>Zalo là menu cha có 2 con:</strong> Zalo cá nhân (qua bridge, quét QR) và Zalo OA (API chính thức) là 2 cơ chế khác hẳn nhau — gộp dưới “Zalo” để đúng ngữ cảnh nhưng vẫn tách trang riêng.</li>
+          <li><strong>Trang kênh = tổng hợp toàn bộ, không phải nơi sửa gốc:</strong> cấu hình chi tiết (token/QR) vẫn nằm trong từng cửa hàng — một nguồn sự thật. Trang kênh chỉ liệt kê, so sánh trạng thái, và là lối tắt “Cấu hình/Kết nối”.</li>
+          <li><strong>Badge sidebar đồng bộ [active]/[tổng cửa hàng]:</strong> FB 1/3, Zalo cá nhân 1/3, OA 0/3 — nhìn lướt biết ngay còn bao nhiêu cửa hàng chưa bật kênh. Màu: còn cửa hàng chưa bật → amber, chưa có cái nào → xám.</li>
+          <li><strong>Nút “Khởi động lại Bridge” ngay trên Admin:</strong> thay vì bắt người dùng SSH vào server gõ lệnh. Trước mắt là nút bấm; định hướng là để bridge tự lắng nghe sự kiện (event/webhook) khỏi phải restart tay.</li>
+          <li><strong>Zalo OA gắn nhãn “Beta” (trên trang) + banner “Chưa xác minh”:</strong> trung thực với thực tế backend (chưa có tài liệu API), tránh vận hành nhầm. Badge sidebar để dạng số 0/3 cho đồng bộ, giữ màu xám báo hiệu chưa dùng.</li>
+          <li><strong>Đơn theo kênh:</strong> tận dụng cột <code>channel</code> đã có trong đơn để mỗi trang kênh đo được hiệu quả riêng.</li>
+        </ul>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<script>
+  const items = document.querySelectorAll('[data-view]');
+  const pages = document.querySelectorAll('[data-page]');
+  const zaloGroup = document.getElementById('zaloGroup');
+  const zaloParent = document.getElementById('zaloParent');
+
+  function show(view) {
+    items.forEach(i => i.classList.toggle('active', i.dataset.view === view));
+    pages.forEach(p => p.classList.toggle('show', p.dataset.page === view));
+    if (view === 'ch-zca' || view === 'ch-oa') zaloGroup.classList.add('open');
+  }
+  items.forEach(i => i.addEventListener('click', () => show(i.dataset.view)));
+  zaloParent.addEventListener('click', () => zaloGroup.classList.toggle('open'));
+
+  const baToggle = document.getElementById('baToggle');
+  const baPanel = document.getElementById('baPanel');
+  baToggle.addEventListener('click', () => {
+    const on = baPanel.classList.toggle('show');
+    baToggle.classList.toggle('on', on);
+  });
+</script>
