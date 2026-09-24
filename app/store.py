@@ -13,6 +13,11 @@ from . import repository
 
 def init_db() -> None:
     repository.init_db()
+    # Seed 3 cửa hàng builtin (default/shop2/chao) nếu DB còn trống — cần thiết trên môi
+    # trường mới (đĩa Render reset mỗi lần deploy), an toàn gọi lại nhiều lần (mỗi store
+    # tự bỏ qua nếu đã tồn tại, xem scripts/migrate_to_db.py).
+    from .scripts.migrate_to_db import _seed_stores
+    _seed_stores()
 
 
 def create_retail_order(items: list, subtotal: int, customer: dict, payment: str,
