@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Commerce Admin — Quản lý Bot</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:ital,wght@0,400;0,500;0,600;0,700;0,800;1,500&display=swap"
+      rel="stylesheet"
+    />
+    <script>
+      // Đặt data-theme TRƯỚC khi CSS được áp dụng để tránh nháy sáng/tối (FOUC).
+      // Logic đầy đủ (đọc/ghi localStorage) nằm ở src/lib/theme.js — đoạn này chỉ
+      // đọc lại để sơn đúng theme ngay từ đầu, không ghi gì cả.
+      (function () {
+        try {
+          var saved = localStorage.getItem('commerce-admin-theme');
+          var theme =
+            saved === 'light' || saved === 'dark'
+              ? saved
+              : window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches
+                ? 'light'
+                : 'dark';
+          document.documentElement.setAttribute('data-theme', theme);
+        } catch (e) {
+          document.documentElement.setAttribute('data-theme', 'dark');
+        }
+      })();
+    </script>
+    <script type="module" crossorigin src="/admin/assets/index-bCSREldX.js"></script>
+    <link rel="stylesheet" crossorigin href="/admin/assets/index-Bn99hXnk.css">
+  </head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>
