@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+orders.db
+app/stores_config.json
+admin/node_modules/
+static/admin/
+app/commerce.db
+*.db
