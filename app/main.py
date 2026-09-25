@@ -183,6 +183,18 @@ async def health():
     return {"status": "ok"}
 
 
+# ---------------- Trang công khai cho Meta App Review (Privacy Policy / Terms) ----------------
+
+@app.get("/privacy")
+async def privacy():
+    return FileResponse(os.path.join(STATIC_DIR, "privacy.html"))
+
+
+@app.get("/terms")
+async def terms():
+    return FileResponse(os.path.join(STATIC_DIR, "terms.html"))
+
+
 # ==================== Quản lý Bot (console) ====================
 
 router = APIRouter(prefix="/api")
