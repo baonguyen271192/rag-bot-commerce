@@ -25,7 +25,6 @@ from __future__ import annotations
 import os
 import re
 import threading
-import time
 import unicodedata
 
 from . import data, store, assistant, stores
@@ -617,7 +616,7 @@ def _do_submit(sess: dict) -> list[dict]:
         # stores.py: "facebook"/"zalo_oa"/"zalo_personal"), không hardcode "facebook"
         # nữa (trước đây MỌI đơn — kể cả qua kênh khác — đều bị ghi nhầm "facebook").
         payment=sess["payment"], channel=sess.get("channel", "facebook"),
-        created_at=time.strftime("%d/%m/%Y %H:%M"),
+        created_at=data.now_vn().strftime("%d/%m/%Y %H:%M"),
         store_id=sess.get("store_id", "default"), has_size=_has_size(sess),
     )
     if shortages:
