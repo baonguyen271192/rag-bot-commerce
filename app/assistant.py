@@ -106,7 +106,12 @@ def _match_products_by_name(s: str, limit: int = 10, products=None, min_score: i
     Việt bỏ dấu dễ đụng độ (câu tào lao 'mấy giờ' -> 'may gio' trùng chữ 'may' trong
     'xỏ chân MAY viền'; 'chán vậy' -> 'chan vay' trùng chữ 'chan' trong 'xỏ CHÂN') — khớp 1
     từ không đủ tin cậy để khoá vào 1 sản phẩm cụ thể hay bật cả carousel."""
-    q = [t for t in re.split(r"\s+", s) if len(t) >= 3 and t not in _NAME_STOP]
+    # set(), không phải list: câu khách lặp lại 1 từ (vd "chân" xuất hiện 2 lần) không
+    # được tính là 2 TỪ KHÁC NHAU khớp — nếu không dedupe, sản phẩm nào chỉ chứa đúng
+    # 1 từ đó trong tên (vd "xỏ chân" — gần như mọi sản phẩm giày đều có) sẽ bị đếm
+    # score=2 giả, lọt qua min_score dù thực chất chỉ khớp 1 từ có nghĩa (bug tìm thấy
+    # lúc test carousel bị lan man sang cả giày nam/trẻ em cho câu hỏi giày nữ).
+    q = {t for t in re.split(r"\s+", s) if len(t) >= 3 and t not in _NAME_STOP}
     if not q:
         return []
     pool = products or []
@@ -192,11 +197,19 @@ def _parse_sizes(s: str, store_id: str = "default") -> list[str]:
     return sorted(found)
 
 
-def _parse_qty(s: str):
+def _parse_qty(s: str, store_id: str | None = None):
     m = re.search(r"m[oô]i\s*size\s*(\d+)", s)
     if m:
         return int(m.group(1))
-    m = re.search(r"(\d+)\s*(?:doi|d[eé]p|cai)\b", s)
+    units = ["doi", "d[eé]p", "cai"]
+    if store_id:
+        # Đơn vị THẬT của store (vd 'phần' cho quán ăn) — trước đây chỉ nhận đôi/dép/cái
+        # (từ giày), nên câu 'cho em 2 phần cháo' không đọc ra được số lượng dù có số rõ
+        # ràng, khiến _try_nl_order coi như chưa đủ thông tin.
+        unit = _strip(stores.get(store_id).get("unit") or "")
+        if unit and unit not in units:
+            units.append(re.escape(unit))
+    m = re.search(r"(\d+)\s*(?:%s)\b" % "|".join(units), s)
     if m:
         return int(m.group(1))
     return None
@@ -204,10 +217,11 @@ def _parse_qty(s: str):
 
 def _is_create_intent(s: str, store_id: str = "default") -> bool:
     verbs = ["dat ", "dat mua", "dat don", "lay ", "mua ", "nhap ", "order", "can mua",
-             "cho toi", "cho minh", "cho anh", "cho chi", "muon lay", "muon dat", "len don"]
+             "cho toi", "cho minh", "cho anh", "cho chi", "cho em", "muon lay", "muon dat", "len don"]
     has_verb = any(v in f" {s} " for v in verbs)
-    has_target = _parse_sizes(s, store_id) or re.search(r"\d+\s*doi", s) or any(
-        k in s for kws in _PRODUCT_KW.values() for k in kws)
+    has_target = (_parse_sizes(s, store_id) or re.search(r"\d+\s*doi", s)
+                  or _parse_qty(s, store_id) is not None
+                  or any(k in s for kws in _PRODUCT_KW.values() for k in kws))
     return bool(has_verb and has_target)
 
 
@@ -326,8 +340,13 @@ _RETAIL_SYS = (
     "**, *, _, # — Messenger không hiển thị được, khách sẽ thấy dấu sao/gạch dưới thừa "
     "y nguyên trong tin nhắn, chỉ viết chữ thường bình thường. Số tiền dạng 30.000₫. "
     "Nếu đang liệt kê 1 hay nhiều mẫu cụ thể kèm màu/size (đã đủ thông tin để đặt): LUÔN "
-    "nêu rõ field 'code' của từng mẫu/màu và nói khách có thể gõ đúng mã đó để đặt ngay "
-    "(vd 'gõ SD3638-49-HONG để đặt'). Nếu khách CHƯA rõ muốn mẫu nào (mới hỏi chung, chưa "
+    "nêu rõ field 'code' của từng mẫu/màu và nói khách CẦN gõ đúng mã đó để đặt "
+    "(vd 'gõ SD3638-49-HONG để đặt'). BẠN CHỈ ĐANG TƯ VẤN BẰNG CHỮ, CHƯA HỀ thao tác giỏ "
+    "hàng thật — TUYỆT ĐỐI KHÔNG dùng các cụm như 'đã thêm', 'đã đặt', 'đã lưu', 'đã ghi "
+    "nhận' hay bất kỳ cách nói nào ngụ ý đơn/giỏ hàng đã được cập nhật, dù khách nói 'cho "
+    "em thêm X' — chỉ có việc khách tự gõ đúng mã sản phẩm mới thực sự thêm vào giỏ (do hệ "
+    "thống khác xử lý, không phải bạn); nói sai sẽ khiến khách tưởng đã đặt xong trong khi "
+    "giỏ hàng vẫn trống. Nếu khách CHƯA rõ muốn mẫu nào (mới hỏi chung, chưa "
     "đủ chi tiết): trả lời ngắn, gợi ý khách xem thêm sản phẩm để chọn. TUYỆT ĐỐI KHÔNG "
     "nhắc lại nguyên văn tên nút (vd '🛒 Xem sản phẩm') trong câu chữ — nút đã hiện RIÊNG "
     "bên dưới tin nhắn rồi, nhắc lại trong câu sẽ bị trùng/thừa, đọc rất kỳ. "

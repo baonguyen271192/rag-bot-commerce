@@ -687,6 +687,30 @@ def _extract_size_qty(text: str, store_id: str = "default") -> dict:
     return out
 
 
+def _try_direct_add(sess: dict, code: str, text: str) -> list[dict] | None:
+    """Khách gõ mã sản phẩm KÈM LUÔN size/số lượng trong cùng 1 câu (vd 'lấy mã
+    GMI0008-DEN size 39 cho em 1 đôi') — thêm giỏ NGAY, không hỏi lại. Trước đây nhánh
+    gõ-mã-tay (dò qua _find_code_candidates) luôn nhảy thẳng vào _show_size_grid/
+    _show_qty bất kể câu có kèm đủ size/số lượng hay chưa, bỏ qua hoàn toàn logic trích
+    size+SL tự nhiên mà _try_nl_order đã có sẵn — bug tìm thấy khi quay demo: khách nói
+    đủ mã+size+số lượng trong 1 câu vẫn bị hỏi lại size. Trả None nếu câu không kèm đủ
+    thông tin, để nơi gọi rơi về hỏi lại như cũ."""
+    store_id = sess.get("store_id", "default")
+    s = assistant._strip(text)
+    if not _has_size(sess):
+        qty = assistant._parse_qty(s, store_id)
+        return _add_food_to_cart(sess, code, qty) if qty else None
+    rest = re.sub(re.escape(code.lower()), " ", s)
+    qtys = _extract_size_qty(re.sub(re.escape(code), " ", text, flags=re.I), store_id)
+    if not qtys:
+        sizes = assistant._parse_sizes(rest, store_id)
+        if not sizes:
+            return None
+        qty = assistant._parse_qty(s) or 1
+        qtys = {sz: qty for sz in sizes}
+    return _add_to_cart(sess, code, qtys)
+
+
 def _try_nl_order(sess: dict, text: str) -> list[dict] | None:
     """Chat tự nhiên RA ĐƠN: '2 đôi sandal size 40', 'mua Flame 40:2, 41:1'.
     Khớp mẫu + size + số lượng → thêm vào giỏ (tái dùng _add_to_cart). Trả None nếu
@@ -696,9 +720,20 @@ def _try_nl_order(sess: dict, text: str) -> list[dict] | None:
     if not prod:
         return None
     code = prod["code"]
+    store_id = sess.get("store_id", "default")
+    if not _has_size(sess):
+        # Ngành KHÔNG có size (quán ăn...) — chỉ cần khớp món + số lượng, không có khái
+        # niệm size nên không dùng nhánh _extract_size_qty/_parse_sizes bên dưới (dành
+        # riêng cho ngành có size như giày). Trước đây thiếu hẳn nhánh này khiến câu "cho
+        # em 2 phần cháo thập cẩm" luôn rơi xuống AI tư vấn (không món nào thật sự vào
+        # giỏ), và AI lại tự bịa "đã thêm..." dù chưa hề đụng giỏ hàng — bug tìm thấy khi
+        # quay demo Cháo (khách tưởng đã đặt xong nhưng giỏ hàng vẫn trống).
+        if not assistant._is_create_intent(s, store_id):
+            return None
+        qty = assistant._parse_qty(s, store_id) or 1
+        return _add_food_to_cart(sess, code, qty)
     # Bỏ chính mã sản phẩm khỏi chuỗi để chữ số trong mã (vd 'SDG0141') KHÔNG bị đọc thành size.
     s_size = s.replace(code.lower(), " ")
-    store_id = sess.get("store_id", "default")
     qtys = _extract_size_qty(re.sub(re.escape(code), " ", text, flags=re.I), store_id)  # size:sốlượng (40:2, 41:1)
     if qtys:
         return _add_to_cart(sess, code, qtys)
@@ -1036,8 +1071,15 @@ def handle(sender_id: str, text: str, store_id: str = "default", channel: str = 
             av = [s for s, st in _prods(sess)[code]["sizes"].items() if st > 0]
             a1 = av[0] if av else "39"
             a2 = av[1] if len(av) >= 2 else a1
-            return [_msg(f"Dạ em chưa rõ size ạ 😅 Anh/chị nhắn giúp em, ví dụ `{a1}` (1 {_unit(sess)} size {a1}), "
-                         f"`{a1} lấy 2 {_unit(sess)}`, hoặc nhiều size `{a1}:1, {a2}:2` nhé.")]
+            follow = _msg(f"Dạ em chưa rõ size ạ 😅 Anh/chị nhắn giúp em, ví dụ `{a1}` (1 {_unit(sess)} size {a1}), "
+                          f"`{a1} lấy 2 {_unit(sess)}`, hoặc nhiều size `{a1}:1, {a2}:2` nhé.")
+            # Câu hỏi/lan man chen ngang lúc đang chọn size ('ship mấy ngày', 'đổi trả
+            # được không') — trả lời qua AI trước rồi mới hỏi lại size, KHÔNG lặng lẽ nuốt
+            # câu hỏi bằng đúng câu "chưa rõ size" như trước (bug tìm thấy khi quay demo:
+            # khách hỏi ship giữa lúc chọn size, bot phớt lờ câu hỏi).
+            if _looks_like_offtopic(text):
+                return _ai_reply(sess, text) + [follow]
+            return [follow]
         return _add_to_cart(sess, code, qtys)
 
     # Đang hỏi "giao đến địa chỉ cũ có đúng không" — khách gõ tự do thay vì bấm nút.
@@ -1149,13 +1191,15 @@ def handle(sender_id: str, text: str, store_id: str = "default", channel: str = 
     # Gõ thẳng mã sản phẩm / tên danh mục ở bước duyệt (chấp nhận gõ tắt/có chữ dẫn)
     if text.upper() in _prods(sess):
         resolved = text.upper()
-        return _show_size_grid(sess, resolved) if _has_size(sess) else _show_qty(sess, resolved)
+        return (_try_direct_add(sess, resolved, text)
+                or (_show_size_grid(sess, resolved) if _has_size(sess) else _show_qty(sess, resolved)))
     code_hits = _find_code_candidates(sess, text)
     if len(code_hits) > 1:                          # gõ mã mập mờ (nhiều màu) -> hỏi lại rõ
         return _ambiguous_code_prompt(sess, code_hits)
     if len(code_hits) == 1:
         resolved = code_hits[0]
-        return _show_size_grid(sess, resolved) if _has_size(sess) else _show_qty(sess, resolved)
+        return (_try_direct_add(sess, resolved, text)
+                or (_show_size_grid(sess, resolved) if _has_size(sess) else _show_qty(sess, resolved)))
     if text in stores.categories(sid):
         return _show_products(text, sid, sess)
 
