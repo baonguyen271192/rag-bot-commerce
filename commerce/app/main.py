@@ -22,10 +22,15 @@ from pydantic import BaseModel
 
 load_dotenv()
 
+# `crypto` import ĐẦU TIÊN, TRƯỚC mọi module khác — module này raise RuntimeError ngay
+# lúc import nếu thiếu/sai `CREDENTIALS_KEY` (fail-fast, Q2), để app dừng ngay lúc
+# khởi động uvicorn thay vì đợi tới request đầu tiên chạm credentials mới lộ lỗi.
+from . import crypto  # noqa: F401
+
 # zalo_oa: import sẵn cho khi câu 3 (tài liệu Zalo OA) được chốt — webhook_zalo_oa()
 # dưới đây hiện DỪNG trước khi gọi tới nó (xem TODO trong hàm), nên module này CHƯA
 # thực sự được gọi, chỉ giữ chỗ để không phải sửa lại import khi có tài liệu.
-from . import engine, messenger, store, stores, zalo_adapter, zalo_oa  # noqa: F401
+from . import business_types, engine, messenger, store, stores, zalo_adapter, zalo_oa  # noqa: F401
 
 app = FastAPI(title="Commerce — Bot đặt đơn đa cửa hàng")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -200,7 +205,13 @@ def _channel_public(channel_type: str, cfg: dict) -> dict:
 
 
 def _store_summary(st: dict) -> dict:
-    n_orders = len(store.list_orders(st["id"]))
+    orders = store.list_orders(st["id"])
+    n_orders = len(orders)
+    # list_orders() trả ORDER BY id DESC -> orders[0] là đơn gần nhất. Admin UI dùng
+    # field này để phân biệt "đang mất đơn mới" (có lịch sử, giờ kênh gãy) với "chưa
+    # từng nhận đơn" khi hiện cảnh báo "cần xử lý" — order_count một mình không nói lên
+    # điều đó (đơn có thể đến từ TRƯỚC khi kênh mất kết nối).
+    last_order_at = orders[0]["created_at"] if orders else None
     # BUG TÌM THẤY LÚC TEST (đã sửa): trước đây `connected` tính riêng, KHÔNG xét
     # `channels.facebook.enabled` -> lệch với `channels.facebook.connected` (dùng
     # stores.channel_connected(), CÓ xét enabled) mỗi khi kênh facebook bị tắt qua
@@ -229,6 +240,7 @@ def _store_summary(st: dict) -> dict:
         "builtin": stores.is_builtin(st["id"]),
         "menu_count": len(st.get("products", {})),
         "order_count": n_orders,
+        "last_order_at": last_order_at,
     }
 
 
@@ -240,6 +252,14 @@ def list_stores(business_type: Optional[str] = None):
     if business_type:
         out = [s for s in out if s["business_type"] == business_type]
     return out
+
+
+@router.get("/admin/business-types")
+def admin_business_types():
+    """Danh sách ngành hàng hỗ trợ sẵn (nhãn + mặc định biến thể/đơn vị) — admin UI vẽ
+    theo danh sách này thay vì hardcode 2 lựa chọn cố định, để thêm 1 ngành mới chỉ cần
+    sửa `business_types.py`, không cần đổi/build lại phần chọn ngành trên React."""
+    return business_types.list_types()
 
 
 @router.get("/admin/stores")

@@ -18,6 +18,7 @@ async function request(path, options = {}) {
 }
 
 export const api = {
+  listBusinessTypes: () => request('/api/admin/business-types'),
   listStores: () => request('/api/admin/stores'),
   getStore: (id) => request(`/api/admin/stores/${id}`),
   createStore: (body) => request('/api/admin/stores', { method: 'POST', body: JSON.stringify(body) }),

@@ -5,13 +5,14 @@ import { api } from '../lib/api'
 import { BADGE_TONE_CLASS, badgeTone, channelCounts } from '../lib/channels'
 import ThemeToggle from './ThemeToggle'
 
-// IA sidebar 2 nhóm — "Tổng quan" (Tổng quan/Cửa hàng, route hiện có) và "Kênh"
-// (Facebook + Zalo cá nhân/OA, route mới). Xem docs/channels-ia-mockup.html — nguồn
-// thiết kế đã duyệt cho cấu trúc/nhãn/badge dưới đây.
+// IA sidebar 2 nhóm — "Tổng quan" (Tổng quan: digest cần xử lý ở "/", Cửa hàng: danh
+// sách quản lý ở "/stores") và "Kênh" (Facebook + Zalo cá nhân/OA). Xem
+// docs/channels-ia-mockup.html — nguồn thiết kế đã duyệt cho cấu trúc/nhãn/badge dưới đây.
 export default function AppShell({ children }) {
   const location = useLocation()
   const path = location.pathname
-  const onList = path === '/'
+  const onOverview = path === '/'
+  const onStoreList = path === '/stores'
   const onFacebook = path === '/channels/facebook'
   const onZaloPersonal = path === '/channels/zalo-personal'
   const onZaloOa = path === '/channels/zalo-oa'
@@ -38,7 +39,7 @@ export default function AppShell({ children }) {
     <div className="flex min-h-screen">
       <aside className="fixed inset-y-0 left-0 hidden w-64 flex-col border-r border-line bg-surface2/80 px-4 py-6 backdrop-blur-xl sm:flex">
         <Link to="/" className="mb-6 flex items-center gap-2.5 px-2">
-          <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-violet-500 text-white shadow-lg shadow-indigo-500/30">
+          <span className="flex h-9 w-9 items-center justify-center rounded-lg border-2 border-indigo-800 bg-indigo-700 text-white shadow-[2px_2px_0_var(--color-indigo-800)]">
             <ShoppingBag size={18} />
           </span>
           <div className="leading-tight">
@@ -49,10 +50,10 @@ export default function AppShell({ children }) {
 
         <nav className="flex flex-1 flex-col gap-1 overflow-y-auto">
           <NavLabel>Tổng quan</NavLabel>
-          <NavItem to="/" icon={LayoutGrid} active={onList}>
+          <NavItem to="/" icon={LayoutGrid} active={onOverview}>
             Tổng quan
           </NavItem>
-          <NavItem to="/" icon={Store} active={onList}>
+          <NavItem to="/stores" icon={Store} active={onStoreList}>
             Cửa hàng
             {stores && <NavBadge tone="default">{stores.length}</NavBadge>}
           </NavItem>
@@ -142,8 +143,10 @@ function NavItem({ to, icon: Icon, active, children }) {
     <Link
       to={to}
       className={
-        'flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors ' +
-        (active ? 'bg-fg/[0.06] text-fg' : 'text-fg/60 hover:bg-fg/[0.04] hover:text-fg/90')
+        'flex items-center gap-2.5 rounded-r-lg border-l-[3px] px-3 py-2 text-sm font-medium transition-colors ' +
+        (active
+          ? 'border-indigo-600 bg-indigo-500/10 text-fg'
+          : 'border-transparent text-fg/60 hover:bg-fg/[0.04] hover:text-fg/90')
       }
     >
       <Icon size={16} className="shrink-0" />

@@ -1,13 +1,16 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Footprints, PlusCircle, Soup } from 'lucide-react'
+import { PlusCircle } from 'lucide-react'
 import { api } from '../lib/api'
+import { bizOf } from '../lib/business'
 import ErrorBanner from '../components/ErrorBanner'
+
+const ID_RE = /^[a-z0-9][a-z0-9-]{1,63}$/
 
 const initial = {
   id: '',
   name: '',
-  business_type: 'food',
+  business_type: '',
   unit: '',
   variant_mode: 'khong_co',
   variant_min: 24,
@@ -20,23 +23,68 @@ const initial = {
 
 export default function CreateStorePage() {
   const [form, setForm] = useState(initial)
+  const [types, setTypes] = useState(null)
   const [error, setError] = useState('')
+  const [fieldErrors, setFieldErrors] = useState({})
   const [saving, setSaving] = useState(false)
   const navigate = useNavigate()
 
+  // Danh sách ngành hàng lấy TỪ BACKEND (app/business_types.py) — không hardcode ở đây
+  // nữa, để thêm 1 ngành mới chỉ cần sửa Python, trang này tự vẽ thêm nút mà không cần
+  // build lại riêng phần chọn ngành.
+  useEffect(() => {
+    api.listBusinessTypes()
+      .then((list) => {
+        setTypes(list)
+        if (list.length > 0) applyBusinessType(list[0])
+      })
+      .catch((e) => setError(e.message))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   const set = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }))
+
+  function applyBusinessType(t) {
+    setForm((f) => ({
+      ...f,
+      business_type: t.key,
+      variant_mode: t.variant_mode,
+      variant_min: t.variant_min,
+      variant_max: t.variant_max,
+      variant_labels: (t.variant_labels || []).join(', '),
+      unit: f.unit || t.unit,
+    }))
+  }
+
+  function validate(payload) {
+    const errs = {}
+    if (!ID_RE.test(payload.id)) {
+      errs.id = 'Chỉ chữ thường a-z, số và dấu gạch ngang, bắt đầu bằng chữ/số, dài 2-64 ký tự (vd: chao-o-hoen).'
+    }
+    if (payload.variant_mode === 'nhan' && payload.variant_labels.length === 0) {
+      errs.variant_labels = "Kiểu 'danh sách nhãn tự đặt' cần ít nhất 1 nhãn (vd S, M, L)."
+    }
+    if (payload.variant_mode === 'so' && payload.variant_min > payload.variant_max) {
+      errs.variant_min = 'Số nhỏ nhất phải nhỏ hơn hoặc bằng số lớn nhất.'
+    }
+    return errs
+  }
 
   async function handleSubmit(e) {
     e.preventDefault()
     setError('')
+    const payload = {
+      ...form,
+      id: form.id.trim().toLowerCase(),
+      variant_min: Number(form.variant_min) || 0,
+      variant_max: Number(form.variant_max) || 0,
+      variant_labels: form.variant_labels.split(',').map((s) => s.trim()).filter(Boolean),
+    }
+    const errs = validate(payload)
+    setFieldErrors(errs)
+    if (Object.keys(errs).length > 0) return
     setSaving(true)
     try {
-      const payload = {
-        ...form,
-        variant_min: Number(form.variant_min) || 0,
-        variant_max: Number(form.variant_max) || 0,
-        variant_labels: form.variant_labels.split(',').map((s) => s.trim()).filter(Boolean),
-      }
       const created = await api.createStore(payload)
       navigate(`/stores/${created.id}`)
     } catch (err) {
@@ -49,12 +97,12 @@ export default function CreateStorePage() {
   return (
     <div className="max-w-2xl">
       <div className="mb-8 flex items-center gap-3">
-        <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-violet-500 shadow-lg shadow-indigo-500/30">
+        <span className="flex h-11 w-11 items-center justify-center rounded-lg border-2 border-indigo-800 bg-indigo-700 shadow-[2px_2px_0_var(--color-indigo-800)]">
           <PlusCircle size={20} className="text-white" />
         </span>
         <div>
           <h1 className="text-2xl font-semibold tracking-tight text-fg">Tạo cửa hàng mới</h1>
-          <p className="text-sm text-fg/45">Bot sẽ chạy ngay sau khi tạo, không cần deploy lại.</p>
+          <p className="text-sm text-fg/45">Bot sẽ trả lời khách trên Facebook ngay sau khi tạo và bật kênh, không cần deploy lại.</p>
         </div>
       </div>
 
@@ -62,7 +110,7 @@ export default function CreateStorePage() {
 
       <form onSubmit={handleSubmit} className="card p-6">
         <div className="grid gap-5 sm:grid-cols-2">
-          <Field label="Mã cửa hàng (id)" hint="Chữ thường, không dấu, dùng nội bộ">
+          <Field label="Mã cửa hàng (id)" hint="Chữ thường, không dấu, không khoảng trắng — dùng nội bộ" error={fieldErrors.id}>
             <input required value={form.id} onChange={set('id')} className="input" placeholder="chao-o-hoen" />
           </Field>
           <Field label="Tên cửa hàng">
@@ -72,32 +120,34 @@ export default function CreateStorePage() {
 
         <div className="mt-5">
           <span className="mb-2 block text-sm font-medium text-fg/80">Ngành hàng</span>
-          <div className="grid grid-cols-2 gap-3">
-            <BusinessOption
-              icon={Soup}
-              label="Ăn uống"
-              hint="Đặt theo món/phần"
-              active={form.business_type === 'food'}
-              onClick={() => setForm((f) => ({ ...f, business_type: 'food', variant_mode: 'khong_co' }))}
-            />
-            <BusinessOption
-              icon={Footprints}
-              label="Giày/Dép"
-              hint="Đặt theo size"
-              active={form.business_type === 'shoe'}
-              onClick={() => setForm((f) => ({ ...f, business_type: 'shoe', variant_mode: 'so' }))}
-            />
-          </div>
+          <p className="mb-2.5 text-xs text-fg/40">
+            Chọn đúng ngành để AI tư vấn đúng kiểu (hỏi size hay hỏi số phần, có gợi ý topping hay
+            không...) và áp policy giao hàng/thanh toán mặc định phù hợp — không phải chỉ đổi tên gọi.
+          </p>
+          {!types && !error && <p className="text-sm text-fg/40">Đang tải danh sách ngành…</p>}
+          {types && (
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+              {types.map((t) => (
+                <BusinessOption
+                  key={t.key}
+                  label={t.label}
+                  hint={t.hint}
+                  icon={bizOf({ business_type: t.key }).icon}
+                  active={form.business_type === t.key}
+                  onClick={() => applyBusinessType(t)}
+                />
+              ))}
+            </div>
+          )}
         </div>
 
         <div className="mt-6 border-t border-fg/[0.06] pt-5">
           <h3 className="mb-4 text-sm font-semibold text-fg/70">
-            Đơn vị &amp; kiểu biến thể — không chỉ giày, sửa lại đây cho đúng ngành thật
+            Đơn vị &amp; kiểu biến thể — đã điền theo ngành vừa chọn, sửa lại nếu cần
           </h3>
           <div className="grid gap-5 sm:grid-cols-2">
-            <Field label="Đơn vị tính" hint="Vd: đôi, phần, cái, chiếc...">
-              <input value={form.unit} onChange={set('unit')} className="input"
-                     placeholder={form.business_type === 'food' ? 'phần' : 'đôi'} />
+            <Field label="Đơn vị tính" hint="Vd: đôi, phần, cái, ly, lượt...">
+              <input value={form.unit} onChange={set('unit')} className="input" placeholder="phần" />
             </Field>
             <Field label="Kiểu biến thể">
               <select value={form.variant_mode} onChange={set('variant_mode')} className="input">
@@ -109,7 +159,7 @@ export default function CreateStorePage() {
           </div>
           {form.variant_mode === 'so' && (
             <div className="mt-4 grid grid-cols-2 gap-4">
-              <Field label="Số nhỏ nhất">
+              <Field label="Số nhỏ nhất" error={fieldErrors.variant_min}>
                 <input type="number" value={form.variant_min} onChange={set('variant_min')} className="input" />
               </Field>
               <Field label="Số lớn nhất">
@@ -119,7 +169,7 @@ export default function CreateStorePage() {
           )}
           {form.variant_mode === 'nhan' && (
             <div className="mt-4">
-              <Field label="Danh sách nhãn" hint="Cách nhau bằng dấu phẩy">
+              <Field label="Danh sách nhãn" hint="Cách nhau bằng dấu phẩy" error={fieldErrors.variant_labels}>
                 <input value={form.variant_labels} onChange={set('variant_labels')} className="input" placeholder="S, M, L, XL" />
               </Field>
             </div>
@@ -139,7 +189,7 @@ export default function CreateStorePage() {
         </div>
 
         <div className="mt-5">
-          <Field label="Tone giọng văn">
+          <Field label="Tone giọng văn" hint="Áp trực tiếp vào cách AI trả lời khách">
             <select value={form.tone} onChange={set('tone')} className="input max-w-xs">
               <option value="warm">Ấm áp, thân thiện</option>
               <option value="professional">Chuyên nghiệp</option>
@@ -178,12 +228,14 @@ function BusinessOption({ icon: Icon, label, hint, active, onClick }) {
   )
 }
 
-function Field({ label, hint, children }) {
+function Field({ label, hint, error, children }) {
   return (
     <label className="block">
       <span className="mb-1.5 block text-sm font-medium text-fg/80">{label}</span>
       {children}
-      {hint && <span className="mt-1 block text-xs text-fg/40">{hint}</span>}
+      {error
+        ? <span className="mt-1 block text-xs text-rose-500">{error}</span>
+        : hint && <span className="mt-1 block text-xs text-fg/40">{hint}</span>}
     </label>
   )
 }

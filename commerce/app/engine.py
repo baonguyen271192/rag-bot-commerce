@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import os
 import re
+import threading
 import time
 import unicodedata
 
@@ -36,6 +37,19 @@ def _public_base() -> str:
     return os.environ.get("PUBLIC_BASE_URL", "").rstrip("/")
 
 SESSIONS: dict[str, dict] = {}
+
+# 1 khoá/phiên — chỉ dùng để chặn CÙNG 1 phiên bị xử lý "Gửi đơn" 2 LẦN chồng nhau thật
+# sự đồng thời (vd webhook gửi lại sự kiện y hệt trước khi lượt xử lý đầu kịp xoá giỏ
+# hàng) — không phải khoá chung, không ảnh hưởng khách khác. Không dọn dẹp theo thời
+# gian (demo, giống SESSIONS) — chấp nhận được ở quy mô hiện tại.
+_SUBMIT_LOCKS: dict[str, threading.Lock] = {}
+
+
+def _submit_lock(key: str) -> threading.Lock:
+    lock = _SUBMIT_LOCKS.get(key)
+    if lock is None:
+        lock = _SUBMIT_LOCKS[key] = threading.Lock()
+    return lock
 
 # Lời chào — luôn đưa khách về menu chính dù đang kẹt ở bước nào (tránh gõ "hi" bị
 # hiểu nhầm là nhập size khi đang ở trạng thái SIZE_INPUT).
@@ -59,6 +73,20 @@ def _is_greeting(low: str) -> bool:
     return False
 
 
+def _looks_like_offtopic(text: str) -> bool:
+    """Câu hỏi/lan man chen ngang lúc đang ở state INFO (thu thập họ tên/SĐT/địa chỉ)
+    — KHÔNG được nuốt làm tên/địa chỉ. Bug tìm thấy khi test thật: khách hỏi "ship bao
+    lâu vậy shop" giữa lúc đang điền thông tin bị hiểu nhầm thành tên người nhận, câu
+    hỏi không được trả lời. Tên/địa chỉ thật rất ngắn, không có dấu "?", không tự nhắc
+    tới "shop" (khách không xưng hô vậy khi khai tên/địa chỉ của chính họ)."""
+    if "?" in text:
+        return True
+    if len(text.split()) > 8:
+        return True
+    s = assistant._strip(text)
+    return any(k in s for k in ("shop", "bao lau", "bao nhieu tien", "the nao", "vay a"))
+
+
 def _new_session(store_id: str = "default") -> dict:
     return {"state": "START", "cart": [], "pending_product": None,
             "customer": {"name": "", "phone": "", "address": ""},
@@ -74,6 +102,7 @@ def _session(sender_id: str, store_id: str = "default", channel: str = "facebook
     key = f"{store_id}:{channel}:{sender_id}"
     if key not in SESSIONS:
         SESSIONS[key] = _new_session(store_id)
+        SESSIONS[key]["_key"] = key
     return SESSIONS[key]
 
 
@@ -225,6 +254,22 @@ def _show_size_grid(sess: dict, code: str) -> list[dict]:
     return [card, _msg("\n".join(lines), qr)]
 
 
+# Số đếm viết bằng chữ (0-10) — khách lớn tuổi/quen gõ chữ hơn bấm số thường trả lời
+# "hai phần" thay vì "2"; chỉ tìm số thuần regex \d+ sẽ bỏ sót hoàn toàn các câu này.
+# Khoá đã qua assistant._strip (bỏ dấu, lowercase) nên viết KHÔNG dấu.
+_SO_CHU = {"khong": 0, "mot": 1, "hai": 2, "ba": 3, "bon": 4, "nam": 5,
+           "sau": 6, "bay": 7, "tam": 8, "chin": 9, "muoi": 10}
+
+
+def _word_to_qty(text: str) -> int:
+    """Tìm SỐ ĐẦU TIÊN viết bằng chữ trong câu, 0 nếu không có (để nơi gọi coi là
+    'chưa hợp lệ' giống hệt trường hợp không tìm thấy chữ số)."""
+    for tok in assistant._strip(text).split():
+        if tok in _SO_CHU:
+            return _SO_CHU[tok]
+    return 0
+
+
 def _parse_size_qty(text: str) -> tuple[dict, list[str]]:
     """'40:2, 41:1' -> ({'40':2,'41':1}, []). Phần đọc không được trả riêng."""
     out, bad = {}, []
@@ -307,12 +352,22 @@ def _show_qty(sess: dict, code: str) -> list[dict]:
                  f"Anh/chị muốn mấy {unit}? Nhắn số lượng giúp em nhé (ví dụ: `2`).", qr)]
 
 
-def _add_food_to_cart(sess: dict, code: str, qty: int) -> list[dict]:
+# Ngưỡng số lượng "bất thường" cho 1 lần thêm giỏ — KHÔNG chặn, chỉ hỏi xác nhận lại,
+# vì trước đây số lớn hơn 99 bị ÂM THẦM cắt về 99 (khách gõ nhầm '500' tưởng đặt 5 phần
+# thì bị lặng lẽ đổi thành 99 mà không hề biết) — rất dễ tạo đơn sai số lượng lớn mà
+# không ai kịp phát hiện trước khi hàng đã được xác nhận.
+_QTY_CONFIRM_THRESHOLD = 30
+
+
+def _add_food_to_cart(sess: dict, code: str, qty: int, confirmed: bool = False) -> list[dict]:
     p = _prods(sess)[code]
     unit = _unit(sess)
     if qty <= 0:
         return [_msg(f"Dạ số lượng chưa hợp lệ ạ. Anh/chị nhắn số {unit} muốn đặt nhé (ví dụ: `2`).")]
-    qty = min(qty, 99)
+    if qty > _QTY_CONFIRM_THRESHOLD and not confirmed:
+        return [_msg(
+            f"Dạ anh/chị muốn đặt *{qty} {unit}* {p['name']} thật ạ? Số này khá nhiều 😅\n"
+            f"Đúng thì nhắn `xác nhận {qty}` giúp em; nếu gõ nhầm số thì nhắn lại số khác nhé.")]
     cart = sess["cart"]
     price = p["retail"]
     existing = next((it for it in cart if it["code"] == code), None)
@@ -337,13 +392,50 @@ def _cart_summary(sess: dict) -> list[dict]:
                      [("🛒 Xem sản phẩm", "MENU_ORDER")])]
     lines = ["📝 *Giỏ hàng của anh/chị:*", ""]
     subtotal = 0
-    for it in cart:
-        lines.append(f"• {_item_label(it)}\n  {_qty_detail(it, sess)} = {data.vnd(it['line_total'])}")
+    # Đánh số từng dòng + nút Sửa/Xoá RIÊNG cho từng dòng (payload neo theo `code` —
+    # mỗi code chỉ có TỐI ĐA 1 dòng trong giỏ vì _add_to_cart/_add_food_to_cart luôn
+    # gộp vào dòng cũ nếu trùng code, nên không cần lo trùng lặp payload). Trước đây chỉ
+    # có "Xoá giỏ" (xoá SẠCH), không có cách sửa/bớt riêng 1 món — khách muốn bớt 1 món
+    # phải xoá hết rồi đặt lại từ đầu.
+    edit_qr = []
+    for i, it in enumerate(cart, start=1):
+        lines.append(f"{i}. {_item_label(it)}\n   {_qty_detail(it, sess)} = {data.vnd(it['line_total'])}")
         subtotal += it["line_total"]
+        edit_qr.append((f"✏️ Sửa {i}", f"EDITQTY::{it['code']}"))
+        edit_qr.append((f"🗑️ Xoá {i}", f"REMOVE::{it['code']}"))
     lines.append(f"\nTạm tính: *{data.vnd(subtotal)}* (chưa gồm phí ship)")
-    qr = [("✅ Đặt hàng", "CHECKOUT"), ("➕ Thêm sản phẩm", "MENU_ORDER"),
-          ("🗑️ Xoá giỏ", "CLEAR_CART")]
+    qr = edit_qr + [("✅ Đặt hàng", "CHECKOUT"), ("➕ Thêm sản phẩm", "MENU_ORDER"),
+                     ("🗑️ Xoá giỏ", "CLEAR_CART")]
     return [_msg("\n".join(lines), qr)]
+
+
+def _edit_qty_prompt(sess: dict, code: str, size_key: str) -> list[dict]:
+    """Hỏi số lượng MỚI cho 1 dòng giỏ hàng (hoặc 1 size cụ thể trong dòng đó, ngành
+    giày) — `0` là tín hiệu XOÁ hợp lệ ở đây (khác `_show_qty`/thêm mới, nơi 0 luôn là
+    chưa hợp lệ)."""
+    it = next((x for x in sess["cart"] if x["code"] == code), None)
+    if not it:
+        sess["state"] = "CART"
+        return _cart_summary(sess)
+    unit = _unit(sess)
+    cur = it["sizes"].get(size_key, it["qty_total"])
+    label = f" size {size_key}" if size_key else ""
+    return [_msg(f"*{_item_label(it)}*{label} đang có {cur} {unit}. Anh/chị muốn đổi thành mấy {unit} ạ? "
+                 f"(nhắn `0` để xoá khỏi giỏ)")]
+
+
+def _parse_edit_qty(text: str) -> int | None:
+    """Số lượng mới khi sửa giỏ hàng — trả None nếu KHÔNG đọc được số nào (để nơi gọi
+    hỏi lại thay vì hiểu nhầm gõ lung tung thành xoá). '0'/'không' là tín hiệu XOÁ hợp
+    lệ, phải phân biệt rõ với "không đọc được gì" — nếu gộp chung, 1 tin nhắn không rõ
+    nghĩa gõ nhầm giữa lúc sửa giỏ sẽ bị hiểu lầm thành xoá mất món của khách."""
+    m = re.search(r"\d+", text.replace(".", "").replace(",", ""))
+    if m:
+        return int(m.group())
+    for tok in assistant._strip(text).split():
+        if tok in _SO_CHU:
+            return _SO_CHU[tok]
+    return None
 
 
 # ---------------- Thu thập thông tin giao hàng ----------------
@@ -364,8 +456,20 @@ _INFO_PROMPT = (
 def _start_checkout(sess: dict) -> list[dict]:
     if not sess["cart"]:
         return [_msg("Dạ giỏ hàng đang trống ạ. Anh/chị chọn trước nhé!", [("🛒 Xem sản phẩm", "MENU_ORDER")])]
+    cus = sess.get("customer") or {}
+    # Khách đã từng nhập đủ tên/SĐT/địa chỉ (đơn trước đó) → hỏi lại xác nhận thay vì bắt
+    # gõ lại từ đầu mỗi lần đặt — trước đây xoá trắng vô điều kiện ở đây dù nơi tạo đơn có
+    # ghi chú ý định "giữ tên/địa chỉ cho tiện đặt lần sau" (mâu thuẫn: nói giữ nhưng luôn
+    # xoá), khiến khách quen phải nhập lại y hệt mỗi đơn.
+    if cus.get("name") and cus.get("phone") and cus.get("address"):
+        sess["state"] = "INFO_CONFIRM"
+        return [_msg(
+            "Dạ giao đến đúng thông tin cũ này giúp em nhé:\n"
+            f"👤 {cus['name']}\n📞 {cus['phone']}\n📍 {cus['address']}\n\n"
+            "Đúng thì bấm *Đúng, dùng địa chỉ này*, hoặc nhắn thông tin mới nếu muốn đổi.",
+            [("✅ Đúng, dùng địa chỉ này", "INFO_KEEP"), ("✏️ Nhập địa chỉ khác", "INFO_NEW")])]
     sess["state"] = "INFO"
-    sess["customer"] = {"name": "", "phone": "", "address": ""}   # thu thập lại từ đầu cho rõ ràng
+    sess["customer"] = {"name": "", "phone": "", "address": ""}
     return [_msg(_INFO_PROMPT)]
 
 
@@ -416,14 +520,96 @@ def _review(sess: dict) -> list[dict]:
     return [_msg("\n".join(lines), qr)]
 
 
+# Các state coi là "đang chốt đơn dở dang" — chào hỏi giữa chừng ở các bước này KHÔNG
+# được phép reset về menu (mất tiến trình), chỉ nhắc lại đúng bước đang dở (xem
+# `_resume_prompt` + nơi gọi trong `handle()`).
+_CHECKOUT_STATES = ("INFO", "INFO_CONFIRM", "PAYMENT", "REVIEW", "QTY_INPUT", "SIZE_INPUT",
+                     "EDIT_QTY", "EDIT_PICK_SIZE")
+
+
+def _resume_prompt(sess: dict) -> list[dict]:
+    """Nhắc lại ĐÚNG câu hỏi của bước đang dở, không reset — dùng khi khách chào hỏi xã
+    giao ('alo', 'chào shop ơi'...) giữa lúc đang chốt đơn (kiểm tra mạng còn thông chẳng
+    hạn, rất thường gặp ở khách hàng mạng chập chờn) thay vì bị hiểu nhầm là muốn quay về
+    menu và mất hết những gì đã nhập (tên/SĐT/địa chỉ, size đang chọn...)."""
+    state = sess.get("state")
+    cus = sess.get("customer") or {}
+    if state == "INFO":
+        return [_msg(_INFO_PROMPT)]
+    if state == "INFO_CONFIRM":
+        return [_msg(
+            f"👤 {cus.get('name','')}\n📞 {cus.get('phone','')}\n📍 {cus.get('address','')}\n"
+            "Đúng thì bấm nút giúp em ạ:",
+            [("✅ Đúng, dùng địa chỉ này", "INFO_KEEP"), ("✏️ Nhập địa chỉ khác", "INFO_NEW")])]
+    if state == "PAYMENT":
+        return [_msg("Anh/chị chọn giúp em hình thức thanh toán ạ:",
+                     [("💵 COD khi nhận", "PAY::COD khi nhận"), ("🏦 Chuyển khoản", "PAY::Chuyển khoản")])]
+    if state == "REVIEW":
+        return _review(sess)
+    code = sess.get("pending_product")
+    if state == "QTY_INPUT" and code in _prods(sess):
+        return _show_qty(sess, code)
+    if state == "SIZE_INPUT" and code in _prods(sess):
+        return _show_size_grid(sess, code)
+    if state == "EDIT_QTY" and any(it["code"] == code for it in sess["cart"]):
+        return _edit_qty_prompt(sess, code, sess.get("pending_edit_size", ""))
+    if state == "EDIT_PICK_SIZE":
+        it = next((x for x in sess["cart"] if x["code"] == code), None)
+        if it:
+            qr = [(f"Size {s} ({q})", f"EDITSIZE::{code}::{s}") for s, q in it["sizes"].items()]
+            return [_msg(f"*{_item_label(it)}* đang có nhiều size, anh/chị muốn sửa size nào ạ?", qr)]
+    return _main_menu()
+
+
 def _submit(sess: dict) -> list[dict]:
+    """Cổng vào công khai — khoá theo phiên để 2 lượt xử lý CÙNG 1 phiên chồng nhau thật
+    sự đồng thời (vd webhook gửi lại đúng sự kiện 'Gửi đơn' trước khi lượt đầu kịp xoá
+    giỏ) không thể cùng lọt qua kiểm tra 'giỏ hàng còn gì' và tạo 2 đơn trùng cho 1 lần
+    khách bấm. Không ảnh hưởng khách khác (khoá theo từng phiên riêng)."""
+    key = sess.get("_key")
+    if not key:
+        return _do_submit(sess)
+    lock = _submit_lock(key)
+    if not lock.acquire(blocking=False):
+        return [_msg("Dạ đơn đang được xử lý, anh/chị đợi em một chút ạ 🙏")]
+    try:
+        return _do_submit(sess)
+    finally:
+        lock.release()
+
+
+def _handle_stock_shortage(sess: dict, shortages: list[dict]) -> list[dict]:
+    """Có khách khác vừa lấy hết đúng lúc mình chốt đơn (2 người cùng nhắm 1 size cuối
+    cùng) — KHÔNG tạo đơn, tự cắt giỏ hàng về đúng số còn thật rồi mời khách xem lại
+    trước khi gửi lại, thay vì âm thầm tạo đơn cho cả hai người và phải huỷ 1 bên sau."""
+    cart = sess["cart"]
+    lines = ["😥 Dạ rất tiếc, đúng lúc anh/chị chốt đơn thì có khách khác vừa đặt trước:"]
+    for s in shortages:
+        lines.append(f"• {s['name']} size {s['size']}: chỉ còn {s['available']} "
+                     f"(anh/chị đang đặt {s['requested']}).")
+        for it in cart:
+            if it["code"] == s["code"] and s["size"] in it.get("sizes", {}):
+                if s["available"] <= 0:
+                    it["sizes"].pop(s["size"], None)
+                else:
+                    it["sizes"][s["size"]] = s["available"]
+    sess["cart"] = [it for it in cart if it.get("sizes")]
+    for it in sess["cart"]:
+        it["qty_total"] = sum(it["sizes"].values())
+        it["line_total"] = it["qty_total"] * it["unit_price"]
+    sess["state"] = "CART"
+    lines.append("\nEm đã cập nhật lại giỏ hàng theo đúng số còn hàng, anh/chị xem lại giúp em nhé 🙏")
+    return [_msg("\n".join(lines))] + _cart_summary(sess)
+
+
+def _do_submit(sess: dict) -> list[dict]:
     if not sess["cart"]:
         return _cart_summary(sess)
     cart = sess["cart"]
     cus = sess["customer"]
     subtotal = sum(it["line_total"] for it in cart)
 
-    order = store.create_retail_order(
+    order, shortages = store.create_retail_order_checked(
         items=cart, subtotal=subtotal,
         customer={"name": cus["name"], "phone": cus["phone"], "address": cus["address"],
                   "fb_psid": sess.get("psid")},
@@ -432,12 +618,15 @@ def _submit(sess: dict) -> list[dict]:
         # nữa (trước đây MỌI đơn — kể cả qua kênh khác — đều bị ghi nhầm "facebook").
         payment=sess["payment"], channel=sess.get("channel", "facebook"),
         created_at=time.strftime("%d/%m/%Y %H:%M"),
-        store_id=sess.get("store_id", "default"),
+        store_id=sess.get("store_id", "default"), has_size=_has_size(sess),
     )
+    if shortages:
+        return _handle_stock_shortage(sess, shortages)
     oid = order["id"]
     pay = sess["payment"]
     sess["my_orders"].append(oid)
-    # reset để có thể đặt tiếp (giữ tên/địa chỉ cho tiện đặt lần sau)
+    # reset để có thể đặt tiếp (giữ tên/địa chỉ cho tiện đặt lần sau — thật sự giữ được từ
+    # giờ vì `_start_checkout` không còn xoá trắng vô điều kiện, xem hàm đó)
     sess["cart"], sess["state"], sess["payment"] = [], "MENU", None
 
     body = (f"🎉 *Đặt hàng thành công!*  Mã đơn: *{oid}*\n"
@@ -464,6 +653,11 @@ def _track(sess: dict, oid: str | None) -> list[dict]:
             f"Trạng thái: *{o['status']}*", [("📋 Menu", "MENU")])]
     mine = [store.get_order(i, sid) for i in sess.get("my_orders", [])]
     mine = [m for m in mine if m]
+    if not mine:
+        # Phiên RAM có thể vừa bị mất (restart/deploy) trong khi đơn thật vẫn còn trong
+        # DB — tra lại theo chính khách (PSID) thay vì chỉ tin danh sách của phiên hiện
+        # tại, để không báo nhầm "chưa có đơn nào" cho khách thực ra đã từng đặt.
+        mine = store.list_orders_by_psid(sess.get("psid"), sid)
     if not mine:
         return [_msg("Dạ em chưa thấy đơn nào của anh/chị ạ. Anh/chị đặt thử một đơn nhé!",
                      [("🛒 Xem sản phẩm", "MENU_ORDER")])]
@@ -493,6 +687,30 @@ def _extract_size_qty(text: str, store_id: str = "default") -> dict:
     return out
 
 
+def _try_direct_add(sess: dict, code: str, text: str) -> list[dict] | None:
+    """Khách gõ mã sản phẩm KÈM LUÔN size/số lượng trong cùng 1 câu (vd 'lấy mã
+    GMI0008-DEN size 39 cho em 1 đôi') — thêm giỏ NGAY, không hỏi lại. Trước đây nhánh
+    gõ-mã-tay (dò qua _find_code_candidates) luôn nhảy thẳng vào _show_size_grid/
+    _show_qty bất kể câu có kèm đủ size/số lượng hay chưa, bỏ qua hoàn toàn logic trích
+    size+SL tự nhiên mà _try_nl_order đã có sẵn — bug tìm thấy khi quay demo: khách nói
+    đủ mã+size+số lượng trong 1 câu vẫn bị hỏi lại size. Trả None nếu câu không kèm đủ
+    thông tin, để nơi gọi rơi về hỏi lại như cũ."""
+    store_id = sess.get("store_id", "default")
+    s = assistant._strip(text)
+    if not _has_size(sess):
+        qty = assistant._parse_qty(s, store_id)
+        return _add_food_to_cart(sess, code, qty) if qty else None
+    rest = re.sub(re.escape(code.lower()), " ", s)
+    qtys = _extract_size_qty(re.sub(re.escape(code), " ", text, flags=re.I), store_id)
+    if not qtys:
+        sizes = assistant._parse_sizes(rest, store_id)
+        if not sizes:
+            return None
+        qty = assistant._parse_qty(s) or 1
+        qtys = {sz: qty for sz in sizes}
+    return _add_to_cart(sess, code, qtys)
+
+
 def _try_nl_order(sess: dict, text: str) -> list[dict] | None:
     """Chat tự nhiên RA ĐƠN: '2 đôi sandal size 40', 'mua Flame 40:2, 41:1'.
     Khớp mẫu + size + số lượng → thêm vào giỏ (tái dùng _add_to_cart). Trả None nếu
@@ -502,9 +720,20 @@ def _try_nl_order(sess: dict, text: str) -> list[dict] | None:
     if not prod:
         return None
     code = prod["code"]
+    store_id = sess.get("store_id", "default")
+    if not _has_size(sess):
+        # Ngành KHÔNG có size (quán ăn...) — chỉ cần khớp món + số lượng, không có khái
+        # niệm size nên không dùng nhánh _extract_size_qty/_parse_sizes bên dưới (dành
+        # riêng cho ngành có size như giày). Trước đây thiếu hẳn nhánh này khiến câu "cho
+        # em 2 phần cháo thập cẩm" luôn rơi xuống AI tư vấn (không món nào thật sự vào
+        # giỏ), và AI lại tự bịa "đã thêm..." dù chưa hề đụng giỏ hàng — bug tìm thấy khi
+        # quay demo Cháo (khách tưởng đã đặt xong nhưng giỏ hàng vẫn trống).
+        if not assistant._is_create_intent(s, store_id):
+            return None
+        qty = assistant._parse_qty(s, store_id) or 1
+        return _add_food_to_cart(sess, code, qty)
     # Bỏ chính mã sản phẩm khỏi chuỗi để chữ số trong mã (vd 'SDG0141') KHÔNG bị đọc thành size.
     s_size = s.replace(code.lower(), " ")
-    store_id = sess.get("store_id", "default")
     qtys = _extract_size_qty(re.sub(re.escape(code), " ", text, flags=re.I), store_id)  # size:sốlượng (40:2, 41:1)
     if qtys:
         return _add_to_cart(sess, code, qtys)
@@ -522,10 +751,21 @@ def _try_nl_order(sess: dict, text: str) -> list[dict] | None:
 
 
 def _flag_recent_order(sess: dict, complaint_text: str) -> str | None:
-    """Khách đang than phiền — tự tra đơn GẦN NHẤT của khách qua PSID (không cần khách
-    gõ lại mã đơn) và gắn cờ để shop thấy nổi bật trong admin. Trả về mã đơn nếu gắn
-    được, None nếu khách chưa có đơn nào (không có gì để gắn cờ)."""
-    orders = store.list_orders_by_psid(sess.get("psid"), sess.get("store_id"))
+    """Khách đang than phiền. Nếu khách NÊU RÕ mã đơn trong câu (vd 'đơn DH1042 giao
+    thiếu') thì gắn đúng đơn đó — ưu tiên trước, vì đoán bừa 'đơn gần nhất' có thể sai
+    khi khách đang phàn nàn về 1 đơn CŨ trong lúc vừa đặt thêm 1 đơn MỚI khác (đơn gần
+    nhất lúc đó không phải đơn khách đang nói tới). Không nêu mã đơn → mới suy đoán đơn
+    gần nhất của khách qua PSID như trước (chấp nhận có thể sai với ca trên, chưa có
+    cách hỏi lại khách trong luồng này). Trả mã đơn nếu gắn được, None nếu không có gì
+    để gắn cờ."""
+    sid = sess.get("store_id")
+    mo = re.search(r"\bDH\s*\d{3,}\b", complaint_text, re.I)
+    if mo:
+        oid = re.sub(r"\s+", "", mo.group(0)).upper()
+        if store.get_order(oid, sid):
+            store.flag_order(oid, complaint_text)
+            return oid
+    orders = store.list_orders_by_psid(sess.get("psid"), sid)
     if not orders:
         return None
     store.flag_order(orders[0]["id"], complaint_text)
@@ -547,7 +787,13 @@ def _ai_reply(sess: dict, text: str) -> list[dict]:
     if codes:
         sess["last_shown"] = codes[:10]
         elements = [_product_card(prods[c], _unit(sess)) for c in codes[:10]]
-        intro = _msg("Dạ đây là các lựa chọn phù hợp ạ 👇 Bấm *🛒 Chọn* trên mục anh/chị thích để đặt nhé.")
+        # Câu `answer` là AI đã đọc đúng câu hỏi của khách (ngân sách, màu sắc, chính sách
+        # ship...) rồi mới chọn ra `codes` — trước đây bị vứt bỏ, thay bằng 1 dòng mẫu
+        # cứng, khiến khách không bao giờ thấy phần AI đã trả lời đúng ý mình (khách thấy
+        # bot như rule-based dù AI đã suy luận đúng phía sau). Chỉ fallback về dòng mẫu
+        # khi AI trả answer rỗng (không nên xảy ra, nhưng đừng hiện tin nhắn trống).
+        intro = _msg(answer.strip() if answer and answer.strip() else
+                     "Dạ đây là các lựa chọn phù hợp ạ 👇 Bấm *🛒 Chọn* trên mục anh/chị thích để đặt nhé.")
         return [intro, _product_carousel(elements, [("📝 Giỏ hàng", "MENU_CART"),
                                                     ("🔎 Tra đơn", "MENU_TRACK")])]
     chips = res.get("chips") or ["🛒 Xem sản phẩm"]
@@ -634,11 +880,23 @@ def handle(sender_id: str, text: str, store_id: str = "default", channel: str = 
     # Khách gõ TAY đúng chữ hiển thị trên nút ("✅ Đặt hàng") thay vì bấm nút — payload
     # thật của nút là 'CHECKOUT' (mã nội bộ), không phải chữ hiển thị, nên phải nhận
     # diện thêm câu tự nhiên tương đương để không rơi qua AI xử lý sai (đã gặp thật).
-    if low in ("dat hang", "đặt hàng", "checkout", "thanh toan", "thanh toán",
-               "xac nhan don", "xác nhận đơn", "chot don", "chốt đơn"):
+    # LƯU Ý: "chốt đơn"/"xác nhận đơn" KHÔNG được liệt ở đây dù nghe cũng hợp — 2 cụm đó
+    # đã có nghĩa khác (gửi đơn luôn) trong danh sách state==REVIEW bên dưới; để cả ở đây
+    # thì check này (không xét state, chạy trước) luôn thắng, khiến khách gõ "chốt đơn"
+    # lúc đang ở màn xác nhận cuối bị đẩy ngược về bước nhập lại thông tin thay vì gửi
+    # đơn — bug tìm thấy khi test thật.
+    if low in ("dat hang", "đặt hàng", "checkout", "thanh toan", "thanh toán"):
         return _start_checkout(sess)
-    # Lời chào ở BẤT KỲ trạng thái nào → về menu (không bị hiểu nhầm là nhập size).
+    # Lời chào ('alo', 'chào shop ơi'...) — khách hàng mạng chập chờn rất hay gõ câu này
+    # giữa chừng chỉ để kiểm tra bot còn phản hồi không, KỂ CẢ khi đang chốt đơn dở dang.
+    # Nếu đang ở 1 bước đang dở (đã nhập size/đang điền thông tin/đang chọn thanh
+    # toán/đang xem lại đơn), KHÔNG được reset về menu (mất tiến trình, khách phải làm
+    # lại từ đầu) — chỉ nhắc lại đúng bước đang dở. Chỉ reset về menu khi đang ở các bước
+    # "chưa có gì để mất" (MENU/CATEGORY/CART...), giữ đúng ý ban đầu là tránh hiểu nhầm
+    # lời chào thành đang nhập size.
     if _is_greeting(low):
+        if sess.get("state") in _CHECKOUT_STATES:
+            return [_msg("Dạ shop nghe đây ạ 👋")] + _resume_prompt(sess)
         sess["state"] = "MENU"
         sess["pending_product"] = None
         return _welcome(sid)
@@ -693,9 +951,46 @@ def handle(sender_id: str, text: str, store_id: str = "default", channel: str = 
         return _track(sess, None)
     if text == "CHECKOUT":
         return _start_checkout(sess)
+    if text == "INFO_KEEP":
+        if sess.get("state") != "INFO_CONFIRM":
+            return _start_checkout(sess)
+        return _ask_payment(sess)
+    if text == "INFO_NEW":
+        sess["state"] = "INFO"
+        sess["customer"] = {"name": "", "phone": "", "address": ""}
+        return [_msg(_INFO_PROMPT)]
     if text == "CLEAR_CART":
         sess["cart"] = []
         return [_msg("Đã xoá giỏ hàng.")] + _main_menu()
+    # Sửa/xoá TỪNG dòng trong giỏ (nút "✏️ Sửa"/"🗑️ Xoá" ở _cart_summary) — payload neo
+    # theo product code, không theo vị trí, nên xoá/sửa xong thứ tự đổi cũng không sai.
+    if text.startswith("REMOVE::"):
+        code = text[len("REMOVE::"):]
+        sess["cart"] = [it for it in sess["cart"] if it["code"] != code]
+        sess["state"] = "CART"
+        return [_msg("Đã xoá món khỏi giỏ ạ.")] + _cart_summary(sess)
+    if text.startswith("EDITQTY::"):
+        code = text[len("EDITQTY::"):]
+        it = next((x for x in sess["cart"] if x["code"] == code), None)
+        if not it:
+            return _cart_summary(sess)
+        sess["pending_product"] = code
+        # Ngành giày, 1 dòng có nhiều size cùng lúc -> phải hỏi rõ sửa size nào trước,
+        # không thì không biết khách muốn đổi số lượng của size nào trong dòng đó.
+        if _has_size(sess) and len(it["sizes"]) > 1:
+            sess["state"] = "EDIT_PICK_SIZE"
+            qr = [(f"Size {s} ({q})", f"EDITSIZE::{code}::{s}") for s, q in it["sizes"].items()]
+            return [_msg(f"*{_item_label(it)}* đang có nhiều size, anh/chị muốn sửa size nào ạ?", qr)]
+        size_key = next(iter(it["sizes"]), "")
+        sess["pending_edit_size"] = size_key
+        sess["state"] = "EDIT_QTY"
+        return _edit_qty_prompt(sess, code, size_key)
+    if text.startswith("EDITSIZE::"):
+        _, code, size_key = text.split("::", 2)
+        sess["pending_product"] = code
+        sess["pending_edit_size"] = size_key
+        sess["state"] = "EDIT_QTY"
+        return _edit_qty_prompt(sess, code, size_key)
     if text == "SUBMIT":
         return _submit(sess)
     if text == "MENU":
@@ -703,6 +998,32 @@ def handle(sender_id: str, text: str, store_id: str = "default", channel: str = 
         return _main_menu()
 
     state = sess["state"]
+
+    # Đang hỏi số lượng MỚI để sửa 1 dòng giỏ hàng (nút "✏️ Sửa" ở _cart_summary).
+    if state == "EDIT_QTY":
+        code = sess.get("pending_product")
+        size_key = sess.get("pending_edit_size", "")
+        it = next((x for x in sess["cart"] if x["code"] == code), None)
+        if not it:
+            sess["state"] = "CART"
+            return _cart_summary(sess)
+        qty = _parse_edit_qty(text)
+        if qty is None:
+            unit = _unit(sess)
+            return [_msg(f"Dạ anh/chị nhắn số {unit} muốn đổi thành giúp em nhé (vd `2`, hoặc `0` để xoá).")]
+        sess["state"] = "CART"
+        if qty <= 0:
+            if size_key and len(it["sizes"]) > 1:
+                it["sizes"].pop(size_key, None)
+                it["qty_total"] = sum(it["sizes"].values())
+                it["line_total"] = it["qty_total"] * it["unit_price"]
+            else:
+                sess["cart"] = [x for x in sess["cart"] if x["code"] != code]
+            return [_msg("Đã xoá khỏi giỏ ạ.")] + _cart_summary(sess)
+        it["sizes"][size_key] = qty
+        it["qty_total"] = sum(it["sizes"].values())
+        it["line_total"] = it["qty_total"] * it["unit_price"]
+        return [_msg(f"Đã cập nhật *{_item_label(it)}* thành {it['qty_total']} {_unit(sess)} ạ.")] + _cart_summary(sess)
 
     # Quán ăn: đang hỏi SỐ PHẦN của 1 món
     if state == "QTY_INPUT":
@@ -715,8 +1036,11 @@ def handle(sender_id: str, text: str, store_id: str = "default", channel: str = 
                 return _show_qty(sess, hits[0])
         else:
             return _show_qty(sess, text.upper())
+        confirm_m = re.match(r"xac nhan\s+(\d+)", assistant._strip(text))
+        if confirm_m:
+            return _add_food_to_cart(sess, code, int(confirm_m.group(1)), confirmed=True)
         m = re.search(r"\d+", text.replace(".", "").replace(",", ""))
-        qty = int(m.group()) if m else 0
+        qty = int(m.group()) if m else _word_to_qty(text)
         if qty <= 0:
             return [_msg(f"Dạ anh/chị nhắn *số {_unit(sess)}* muốn đặt giúp em nhé (ví dụ: `2`).")]
         return _add_food_to_cart(sess, code, qty)
@@ -747,22 +1071,62 @@ def handle(sender_id: str, text: str, store_id: str = "default", channel: str = 
             av = [s for s, st in _prods(sess)[code]["sizes"].items() if st > 0]
             a1 = av[0] if av else "39"
             a2 = av[1] if len(av) >= 2 else a1
-            return [_msg(f"Dạ em chưa rõ size ạ 😅 Anh/chị nhắn giúp em, ví dụ `{a1}` (1 {_unit(sess)} size {a1}), "
-                         f"`{a1} lấy 2 {_unit(sess)}`, hoặc nhiều size `{a1}:1, {a2}:2` nhé.")]
+            follow = _msg(f"Dạ em chưa rõ size ạ 😅 Anh/chị nhắn giúp em, ví dụ `{a1}` (1 {_unit(sess)} size {a1}), "
+                          f"`{a1} lấy 2 {_unit(sess)}`, hoặc nhiều size `{a1}:1, {a2}:2` nhé.")
+            # Câu hỏi/lan man chen ngang lúc đang chọn size ('ship mấy ngày', 'đổi trả
+            # được không') — trả lời qua AI trước rồi mới hỏi lại size, KHÔNG lặng lẽ nuốt
+            # câu hỏi bằng đúng câu "chưa rõ size" như trước (bug tìm thấy khi quay demo:
+            # khách hỏi ship giữa lúc chọn size, bot phớt lờ câu hỏi).
+            if _looks_like_offtopic(text):
+                return _ai_reply(sess, text) + [follow]
+            return [follow]
         return _add_to_cart(sess, code, qtys)
+
+    # Đang hỏi "giao đến địa chỉ cũ có đúng không" — khách gõ tự do thay vì bấm nút.
+    if state == "INFO_CONFIRM":
+        got = _parse_delivery(text)
+        if got["phone"]:
+            # Khách gõ hẳn thông tin mới thay vì bấm nút -> hiểu là muốn đổi, nhận luôn.
+            sess["customer"] = {"name": got["name"] or sess["customer"].get("name", ""),
+                                 "phone": got["phone"],
+                                 "address": got["address"] or sess["customer"].get("address", "")}
+            sess["state"] = "INFO"
+            missing = [k for k in ("name", "phone", "address") if not sess["customer"].get(k)]
+            if missing:
+                lbl = {"name": "*họ tên người nhận*", "phone": "*số điện thoại*",
+                       "address": "*địa chỉ nhận hàng*"}
+                return [_msg("Dạ em xin thêm " + ", ".join(lbl[m] for m in missing)
+                             + " giúp em nữa nhé ạ (mỗi mục một dòng):")]
+            return _ask_payment(sess)
+        return [_msg("Dạ anh/chị bấm giúp em 1 trong 2 nút bên dưới nhé ạ 👇",
+                     [("✅ Đúng, dùng địa chỉ này", "INFO_KEEP"), ("✏️ Nhập địa chỉ khác", "INFO_NEW")])]
 
     # Thu thập thông tin giao hàng trong 1 tin (text là DỮ LIỆU, không route AI).
     if state == "INFO":
         cus = sess["customer"]
         got = _parse_delivery(text)
+        # Khách hỏi lan man/lạc đề chen ngang (không có SĐT neo) — trả lời qua AI rồi
+        # hỏi lại đúng các mục còn thiếu, KHÔNG được nuốt câu hỏi làm tên/địa chỉ.
+        if not got["phone"] and _looks_like_offtopic(text):
+            missing = [k for k in ("name", "phone", "address") if not cus.get(k)]
+            lbl = {"name": "*họ tên người nhận*", "phone": "*số điện thoại*",
+                   "address": "*địa chỉ nhận hàng*"}
+            follow = _msg("Dạ để tiếp tục đặt hàng, anh/chị cho em xin " + ", ".join(lbl[m] for m in missing)
+                          + " giúp em nhé ạ:")
+            return _ai_reply(sess, text) + [follow]
         if got["phone"]:
+            # Tin có SĐT -> khách đang gửi lại (hoặc gửi lần đầu) CẢ KHỐI thông tin trong 1
+            # tin nhắn -> field nào tin mới CÓ thì ghi đè field cũ, không chỉ điền chỗ
+            # trống. Trước đây dùng `not cus.get(...)` nên nếu tin đầu tiên bị hiểu sai
+            # (vd dính rác vào "tên" vì chưa có SĐT), tin sau gửi lại đúng vẫn giữ tên rác
+            # cũ — bug tìm thấy khi test thật. Khớp đúng cách INFO_CONFIRM đã làm ở trên.
             cus["phone"] = got["phone"]
-        if got["name"] and not cus.get("name"):
-            cus["name"] = got["name"]
-        if got["address"] and not cus.get("address"):
-            cus["address"] = got["address"]
-        # Tin không có SĐT → coi là bổ sung đúng ô còn thiếu (địa chỉ trước, rồi tên).
-        if not got["phone"]:
+            if got["name"]:
+                cus["name"] = got["name"]
+            if got["address"]:
+                cus["address"] = got["address"]
+        else:
+            # Tin không có SĐT → coi là bổ sung đúng ô còn thiếu (địa chỉ trước, rồi tên).
             t = text.strip(" ,;\n\t")
             if cus.get("name") and cus.get("phone") and not cus.get("address"):
                 cus["address"] = t
@@ -778,18 +1142,34 @@ def handle(sender_id: str, text: str, store_id: str = "default", channel: str = 
 
     # Đang hỏi PHƯƠNG THỨC thanh toán — khách gõ TAY đúng/gần chữ trên nút thay vì bấm
     # (payload nút là 'PAY::...', không phải chữ hiển thị) → nhận diện thêm câu tự nhiên.
+    # Dùng so khớp CHỨA (không phải khớp CẢ CÂU chính xác) + bản đã bỏ dấu, để chịu được
+    # sai chính tả/thiếu-thừa 1 chữ (vd 'chuyen khoang', 'ck nha', 'cod nhe ạ') — trước
+    # đây khớp chính xác tuyệt đối khiến các câu này rơi tuột xuống AI tư vấn, khách mất
+    # dấu vết đang cần chọn thanh toán.
     if state == "PAYMENT":
-        if low in ("chuyen khoan", "chuyển khoản", "ck", "banking"):
+        s = assistant._strip(text)
+        if any(k in s for k in ("chuyen khoan", "chuyen khoang")) or s.strip() in ("ck", "banking"):
             if not sess["cart"]:
                 return _cart_summary(sess)
             sess["payment"] = "Chuyển khoản"
             return _review(sess)
-        if low in ("cod", "tien mat", "tiền mặt", "thanh toan khi nhan",
-                   "thanh toán khi nhận", "tra tien khi nhan", "trả tiền khi nhận"):
+        if (any(k in s for k in ("tien mat", "khi nhan")) or s.strip() == "cod"
+                or re.search(r"\bcod\b", s)):
             if not sess["cart"]:
                 return _cart_summary(sess)
             sess["payment"] = "COD khi nhận"
             return _review(sess)
+        # Khách hỏi lại tổng tiền giữa lúc đang chọn thanh toán — trả lời TRỰC TIẾP từ
+        # giỏ hàng thật, KHÔNG rơi qua AI chung ở dưới: AI đó không có ngữ cảnh phiên/giỏ
+        # hàng nên từng trả lời sai hẳn, coi như khách chưa đặt gì — bug tìm thấy khi
+        # test thật (hỏi "tổng nhiêu tiền vậy" sau khi đã có giỏ hàng).
+        if any(k in s for k in ("tong tien", "nhieu tien", "gia bao nhieu", "het bao nhieu")):
+            if not sess["cart"]:
+                return _cart_summary(sess)
+            total = sum(it["line_total"] for it in sess["cart"])
+            return [_msg(f"Dạ tạm tính hiện tại là *{data.vnd(total)}* (chưa gồm phí ship) ạ. "
+                         "Anh/chị chọn giúp em hình thức thanh toán nhé 👇",
+                         [("💵 COD khi nhận", "PAY::COD khi nhận"), ("🏦 Chuyển khoản", "PAY::Chuyển khoản")])]
 
     # Đang ở bước XÁC NHẬN đơn cuối — khách gõ TAY đúng/gần chữ trên nút "✅ Gửi đơn"
     # thay vì bấm (payload nút là 'SUBMIT', không phải chữ hiển thị).
@@ -811,13 +1191,15 @@ def handle(sender_id: str, text: str, store_id: str = "default", channel: str = 
     # Gõ thẳng mã sản phẩm / tên danh mục ở bước duyệt (chấp nhận gõ tắt/có chữ dẫn)
     if text.upper() in _prods(sess):
         resolved = text.upper()
-        return _show_size_grid(sess, resolved) if _has_size(sess) else _show_qty(sess, resolved)
+        return (_try_direct_add(sess, resolved, text)
+                or (_show_size_grid(sess, resolved) if _has_size(sess) else _show_qty(sess, resolved)))
     code_hits = _find_code_candidates(sess, text)
     if len(code_hits) > 1:                          # gõ mã mập mờ (nhiều màu) -> hỏi lại rõ
         return _ambiguous_code_prompt(sess, code_hits)
     if len(code_hits) == 1:
         resolved = code_hits[0]
-        return _show_size_grid(sess, resolved) if _has_size(sess) else _show_qty(sess, resolved)
+        return (_try_direct_add(sess, resolved, text)
+                or (_show_size_grid(sess, resolved) if _has_size(sess) else _show_qty(sess, resolved)))
     if text in stores.categories(sid):
         return _show_products(text, sid, sess)
 

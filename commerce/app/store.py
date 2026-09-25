@@ -1,136 +1,67 @@
-"""Kho đơn hàng (SQLite) của Commerce — đơn khách đặt qua bot, đa cửa hàng (store_id).
+"""Kho đơn hàng của Commerce — đơn khách đặt qua bot, đa cửa hàng (store_id).
 
-Mỗi cửa hàng (tenant) có đơn riêng, lọc bằng `store_id`. Khi lên production thay
-SQLite bằng DB thật, giữ nguyên interface.
+[1a — DB hoá] Ruột đã chuyển sang `repository.py` (Q3 — 1 file `.db` DUY NHẤT gộp cả
+orders, không còn `orders.db` riêng/`_DB_PATH` riêng của module này). File này giờ là
+FAÇADE: giữ nguyên chữ ký mọi hàm public (kể cả default `store_id="default"` — bỏ
+default là việc của lượt 1b, KHÔNG làm ở đây) để `engine.py`/`main.py` không phải sửa.
 """
 
 from __future__ import annotations
 
-import json
-import os
-import sqlite3
-import threading
-
-_DB_PATH = os.path.join(os.path.dirname(__file__), "orders.db")
-_lock = threading.Lock()
-
-
-def _conn() -> sqlite3.Connection:
-    c = sqlite3.connect(_DB_PATH)
-    c.row_factory = sqlite3.Row
-    return c
+from . import repository
 
 
 def init_db() -> None:
-    with _conn() as c:
-        c.execute("""
-            CREATE TABLE IF NOT EXISTS orders (
-                id                TEXT PRIMARY KEY,
-                store_id          TEXT NOT NULL,
-                items_json        TEXT NOT NULL,
-                subtotal          INTEGER NOT NULL,
-                payment           TEXT,
-                status            TEXT NOT NULL,
-                channel           TEXT NOT NULL,
-                created_at        TEXT NOT NULL,
-                customer_name     TEXT,
-                customer_phone    TEXT,
-                customer_address  TEXT,
-                fb_psid           TEXT
-            )
-        """)
-        # Migrate DB cũ (tạo trước khi có tính năng gắn cờ than phiền) — thêm cột nếu thiếu.
-        cols = {r["name"] for r in c.execute("PRAGMA table_info(orders)").fetchall()}
-        if "flagged" not in cols:
-            c.execute("ALTER TABLE orders ADD COLUMN flagged INTEGER DEFAULT 0")
-        if "flag_note" not in cols:
-            c.execute("ALTER TABLE orders ADD COLUMN flag_note TEXT")
-
-
-def _next_order_id() -> str:
-    """Mã đơn dùng chung 'DH<số>' — đọc từ đơn lớn nhất đã có để không trùng khi restart."""
-    with _conn() as c:
-        row = c.execute(
-            "SELECT id FROM orders WHERE id LIKE 'DH%' ORDER BY id DESC LIMIT 1"
-        ).fetchone()
-    n = 1000
-    if row:
-        try:
-            n = int(row["id"].replace("DH", ""))
-        except ValueError:
-            pass
-    return f"DH{n + 1}"
+    repository.init_db()
+    # Seed 3 cửa hàng builtin (default/shop2/chao) nếu DB còn trống — cần thiết trên môi
+    # trường mới (đĩa Render reset mỗi lần deploy), an toàn gọi lại nhiều lần (mỗi store
+    # tự bỏ qua nếu đã tồn tại, xem scripts/migrate_to_db.py).
+    from .scripts.migrate_to_db import _seed_stores
+    _seed_stores()
 
 
 def create_retail_order(items: list, subtotal: int, customer: dict, payment: str,
                         channel: str, created_at: str, store_id: str = "default") -> dict:
-    """Tạo đơn khách đặt qua bot. customer = {name, phone, address, fb_psid?}."""
-    with _lock:
-        oid = _next_order_id()
-        with _conn() as c:
-            c.execute(
-                """INSERT INTO orders (id, store_id, items_json, subtotal, payment, status,
-                   channel, created_at, customer_name, customer_phone, customer_address, fb_psid)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
-                (oid, store_id, json.dumps(items, ensure_ascii=False), subtotal, payment,
-                 "Chờ xác nhận", channel, created_at,
-                 customer.get("name", "Khách"), customer.get("phone", ""),
-                 customer.get("address", ""), customer.get("fb_psid")),
-            )
-    return get_order(oid, store_id)
+    """Tạo đơn khách đặt qua bot, KHÔNG kiểm tra/đụng tồn kho. customer = {name, phone,
+    address, fb_psid?}. Giữ lại cho tương thích/kịch bản không cần kiểm tồn — luồng đặt
+    hàng qua bot thật (`engine._submit`) dùng `create_retail_order_checked` bên dưới để
+    tránh bán trùng size cuối cùng cho 2 khách cùng lúc."""
+    return repository.create_order(
+        items=items, subtotal=subtotal, customer=customer, payment=payment,
+        channel=channel, created_at=created_at, store_id=store_id,
+    )
+
+
+def create_retail_order_checked(items: list, subtotal: int, customer: dict, payment: str,
+                                 channel: str, created_at: str, store_id: str,
+                                 has_size: bool) -> tuple[dict | None, list[dict] | None]:
+    """Tạo đơn CÓ kiểm tra tồn kho (khi `has_size`) — trả (order, None) khi thành công,
+    hoặc (None, shortages) khi có size không đủ hàng (không tạo đơn). Xem
+    `repository.create_order_with_stock` để biết chi tiết cơ chế chống bán trùng."""
+    return repository.create_order_with_stock(
+        items=items, subtotal=subtotal, customer=customer, payment=payment,
+        channel=channel, created_at=created_at, store_id=store_id, has_size=has_size,
+    )
 
 
 def get_order(oid: str, store_id: str | None = None) -> dict | None:
-    q, args = "SELECT * FROM orders WHERE id = ?", [oid]
-    if store_id:
-        q += " AND store_id = ?"
-        args.append(store_id)
-    with _conn() as c:
-        row = c.execute(q, tuple(args)).fetchone()
-    return _row_to_dict(row) if row else None
+    return repository.get_order(oid, store_id)
 
 
 def list_orders(store_id: str | None = None) -> list[dict]:
-    q = "SELECT * FROM orders"
-    args: tuple = ()
-    if store_id:
-        q += " WHERE store_id = ?"
-        args = (store_id,)
-    q += " ORDER BY id DESC"
-    with _conn() as c:
-        rows = c.execute(q, args).fetchall()
-    return [_row_to_dict(r) for r in rows]
+    return repository.list_orders(store_id)
 
 
 def set_status(oid: str, status: str) -> dict | None:
-    with _conn() as c:
-        c.execute("UPDATE orders SET status = ? WHERE id = ?", (status, oid))
-    return get_order(oid)
+    return repository.set_order_status(oid, status)
 
 
 def list_orders_by_psid(psid: str | None, store_id: str | None = None) -> list[dict]:
     """Đơn gần nhất của 1 khách (theo PSID Messenger) — dùng để tự tra đơn khi khách
     than phiền, không cần khách gõ lại mã đơn."""
-    if not psid:
-        return []
-    q, args = "SELECT * FROM orders WHERE fb_psid = ?", [psid]
-    if store_id:
-        q += " AND store_id = ?"
-        args.append(store_id)
-    q += " ORDER BY id DESC LIMIT 5"
-    with _conn() as c:
-        rows = c.execute(q, tuple(args)).fetchall()
-    return [_row_to_dict(r) for r in rows]
+    return repository.list_orders_by_psid(psid, store_id)
 
 
 def flag_order(oid: str, note: str) -> dict | None:
     """Gắn cờ 'cần xử lý' khi khách than phiền về đơn — hiện nổi bật ở admin UI."""
-    with _conn() as c:
-        c.execute("UPDATE orders SET flagged = 1, flag_note = ? WHERE id = ?", (note, oid))
-    return get_order(oid)
-
-
-def _row_to_dict(row: sqlite3.Row) -> dict:
-    d = dict(row)
-    d["items"] = json.loads(d.pop("items_json"))
-    return d
+    return repository.flag_order(oid, note)

@@ -5,20 +5,97 @@
    prefers-color-scheme khác đi. */
 @custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 
+/* ── Bảng màu "Con Dấu Tiệm" ─────────────────────────────────────────────────
+   Ghi đè trực tiếp ramp màu built-in của Tailwind (indigo/emerald/amber/rose/violet)
+   thay vì đặt tên token mới — MỌI className hiện có trong app (bg-amber-500/15,
+   text-emerald-700, border-rose-500/30, outline-indigo-400…) tự động lên màu mới,
+   không cần sửa từng file. Ý nghĩa màu (đã có sẵn trong lib/channels.js/AttentionCard):
+     indigo + emerald -> cùng 1 ramp "xanh rêu" (primary hành động VÀ trạng thái tốt/
+       đã kết nối — 1 màu cho "ổn", không tách 2 màu gần giống nhau vô nghĩa)
+     amber  -> ramp "vàng nghệ" (cần chú ý — cửa hàng chưa lên sóng)
+     rose   -> ramp "đỏ gạch" (đang mất đơn thật — nghiêm trọng hơn amber)
+     violet -> ramp "đất nung" (chip trang trí cho các StatCard phụ, không mang nghĩa
+       trạng thái, chỉ để tạo khác biệt thị giác giữa các thẻ số liệu)
+   blue/sky (Facebook/Zalo cá nhân) giữ nguyên — gắn với màu thương hiệu kênh, không đổi. */
+@theme {
+  --color-indigo-50: #daf5ef;
+  --color-indigo-100: #cbf0e7;
+  --color-indigo-200: #abe7d9;
+  --color-indigo-300: #7fdbc5;
+  --color-indigo-400: #4fceb0;
+  --color-indigo-500: #31af91;
+  --color-indigo-600: #288f76;
+  --color-indigo-700: #1f6f5c;
+  --color-indigo-800: #175345;
+  --color-indigo-900: #0f372e;
+  --color-indigo-950: #081b17;
+
+  --color-emerald-50: #daf5ef;
+  --color-emerald-100: #cbf0e7;
+  --color-emerald-200: #abe7d9;
+  --color-emerald-300: #7fdbc5;
+  --color-emerald-400: #4fceb0;
+  --color-emerald-500: #31af91;
+  --color-emerald-600: #288f76;
+  --color-emerald-700: #1f6f5c;
+  --color-emerald-800: #175345;
+  --color-emerald-900: #0f372e;
+  --color-emerald-950: #081b17;
+
+  --color-amber-50: #fefcf7;
+  --color-amber-100: #fcf6e9;
+  --color-amber-200: #fbefdd;
+  --color-amber-300: #f5d7aa;
+  --color-amber-400: #eebd74;
+  --color-amber-500: #e8a33d;
+  --color-amber-600: #e1911b;
+  --color-amber-700: #bd7a16;
+  --color-amber-800: #9d6513;
+  --color-amber-900: #7d510f;
+  --color-amber-950: #5d3c0b;
+
+  --color-rose-50: #fbf3f1;
+  --color-rose-100: #f7e6e2;
+  --color-rose-200: #f6ddd8;
+  --color-rose-300: #ebb5aa;
+  --color-rose-400: #df8a79;
+  --color-rose-500: #d45e47;
+  --color-rose-600: #c4472e;
+  --color-rose-700: #a33b26;
+  --color-rose-800: #86311f;
+  --color-rose-900: #692619;
+  --color-rose-950: #4c1c12;
+
+  --color-violet-50: #fbf4f0;
+  --color-violet-100: #f7e7df;
+  --color-violet-200: #f2d5c8;
+  --color-violet-300: #e7b29a;
+  --color-violet-400: #db8c69;
+  --color-violet-500: #cf6638;
+  --color-violet-600: #b3552b;
+  --color-violet-700: #924523;
+  --color-violet-800: #75381c;
+  --color-violet-900: #592a15;
+  --color-violet-950: #3c1c0e;
+}
+
 /* ── Semantic color tokens ──────────────────────────────────────────────────
    Khai báo qua @theme để Tailwind v4 sinh sẵn các utility (bg-app, text-fg,
    border-line…) tham chiếu trực tiếp tới custom property — đổi giá trị biến ở
    dưới (theo data-theme) sẽ tự động đổi màu MỌI utility đã sinh, không cần
-   build lại. Giá trị trong @theme là mặc định (tối), vì app này vốn dark-only. */
+   build lại. Giá trị trong @theme là mặc định (tối), vì app này vốn dark-only.
+   app/surface ngả xanh rêu-than thay vì đen trung tính, fg ngả trắng ngà ấm —
+   khớp bảng "Con Dấu Tiệm" (mái hiên tiệm + giấy hoá đơn), không phải xám lạnh. */
 @theme {
-  --color-app: #08090d;
-  --color-surface: #12141b;
-  --color-surface2: #0a0b10;
-  --color-fg: #f5f6fa;
-  --color-fg2: #a6a8b3;
-  --color-fg3: #6f7180;
-  --color-line: rgba(255, 255, 255, 0.08);
-  --color-line-strong: rgba(255, 255, 255, 0.14);
+  --font-sans: "Be Vietnam Pro", -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --color-app: #0b120f;
+  --color-surface: #121b17;
+  --color-surface2: #0d1512;
+  --color-fg: #f4f1e8;
+  --color-fg2: #a9a69b;
+  --color-fg3: #6e6c63;
+  --color-line: rgba(244, 241, 232, 0.08);
+  --color-line-strong: rgba(244, 241, 232, 0.16);
 }
 
 :root {
@@ -28,42 +105,42 @@
 /* Người dùng đã CHỌN sáng (bấm nút, lưu localStorage) → thắng mọi thứ khác. */
 :root[data-theme="light"] {
   color-scheme: light;
-  --color-app: #f6f7fb;
+  --color-app: #f3f1e9;
   --color-surface: #ffffff;
-  --color-surface2: #eef1f6;
-  --color-fg: #14161c;
-  --color-fg2: #5b5f6b;
-  --color-fg3: #8b8e99;
-  --color-line: rgba(15, 17, 23, 0.1);
-  --color-line-strong: rgba(15, 17, 23, 0.16);
+  --color-surface2: #ece8da;
+  --color-fg: #201d1a;
+  --color-fg2: #5b574c;
+  --color-fg3: #8b8778;
+  --color-line: rgba(32, 29, 26, 0.1);
+  --color-line-strong: rgba(32, 29, 26, 0.18);
 }
 
 /* Chưa từng chọn (chưa có data-theme) → theo prefers-color-scheme của OS. */
 @media (prefers-color-scheme: light) {
   :root:not([data-theme]) {
     color-scheme: light;
-    --color-app: #f6f7fb;
+    --color-app: #f3f1e9;
     --color-surface: #ffffff;
-    --color-surface2: #eef1f6;
-    --color-fg: #14161c;
-    --color-fg2: #5b5f6b;
-    --color-fg3: #8b8e99;
-    --color-line: rgba(15, 17, 23, 0.1);
-    --color-line-strong: rgba(15, 17, 23, 0.16);
+    --color-surface2: #ece8da;
+    --color-fg: #201d1a;
+    --color-fg2: #5b574c;
+    --color-fg3: #8b8778;
+    --color-line: rgba(32, 29, 26, 0.1);
+    --color-line-strong: rgba(32, 29, 26, 0.18);
   }
 }
 
 /* Người dùng đã CHỌN tối → khôi phục đúng giá trị tối, thắng cả 2 nhánh trên. */
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --color-app: #08090d;
-  --color-surface: #12141b;
-  --color-surface2: #0a0b10;
-  --color-fg: #f5f6fa;
-  --color-fg2: #a6a8b3;
-  --color-fg3: #6f7180;
-  --color-line: rgba(255, 255, 255, 0.08);
-  --color-line-strong: rgba(255, 255, 255, 0.14);
+  --color-app: #0b120f;
+  --color-surface: #121b17;
+  --color-surface2: #0d1512;
+  --color-fg: #f4f1e8;
+  --color-fg2: #a9a69b;
+  --color-fg3: #6e6c63;
+  --color-line: rgba(244, 241, 232, 0.08);
+  --color-line-strong: rgba(244, 241, 232, 0.16);
 }
 
 * {
@@ -74,13 +151,13 @@ html,
 body {
   background: var(--color-app);
   color: var(--color-fg);
-  font-family: -apple-system, "Inter", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
   transition: background-color 0.15s, color 0.15s;
 }
 
 ::selection {
-  background: rgba(129, 140, 248, 0.35);
+  background: rgba(49, 175, 145, 0.35);
 }
 
 /* @layer components: để utility Tailwind (vd border-amber-500/25, bg-amber-500/[0.04])
@@ -90,8 +167,8 @@ body {
 @layer components {
   .input {
     width: 100%;
-    border-radius: 0.625rem;
-    border: 1px solid var(--color-line);
+    border-radius: 0.5rem;
+    border: 1px solid var(--color-line-strong);
     background: color-mix(in srgb, var(--color-fg) 4%, transparent);
     padding: 0.6rem 0.8rem;
     font-size: 0.875rem;
@@ -101,9 +178,9 @@ body {
   }
 
   .input:focus {
-    border-color: rgba(129, 140, 248, 0.6);
+    border-color: rgba(31, 111, 92, 0.65);
     background: color-mix(in srgb, var(--color-fg) 6%, transparent);
-    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+    box-shadow: 0 0 0 3px rgba(31, 111, 92, 0.18);
   }
 
   .input::placeholder {
@@ -111,23 +188,23 @@ body {
   }
 
   .card {
-    border-radius: 1rem;
+    border-radius: 0.75rem;
     border: 1px solid var(--color-line);
     background: var(--color-surface);
-    box-shadow: 0 1px 0 var(--color-line) inset, 0 8px 24px -12px rgba(0, 0, 0, 0.5);
+    box-shadow: 0 1px 0 var(--color-line) inset, 0 8px 24px -14px rgba(0, 0, 0, 0.55);
   }
 
   .btn-primary {
-    border-radius: 0.625rem;
-    background: linear-gradient(135deg, #6366f1, #8b5cf6);
-    color: white;
-    font-weight: 500;
-    transition: filter 0.15s, transform 0.1s;
-    box-shadow: 0 4px 16px -4px rgba(99, 102, 241, 0.5);
+    border-radius: 0.5rem;
+    background: #1f6f5c;
+    color: #f4f1e8;
+    font-weight: 600;
+    transition: background-color 0.15s, transform 0.1s;
+    box-shadow: 0 4px 14px -4px rgba(31, 111, 92, 0.45);
   }
 
   .btn-primary:hover {
-    filter: brightness(1.08);
+    background: #24816b;
   }
 
   .btn-primary:active {
@@ -137,6 +214,24 @@ body {
   .btn-primary:disabled {
     filter: grayscale(0.3);
     opacity: 0.6;
+  }
+
+  /* "Con dấu" — dùng cho trạng thái xác thực được (đã kết nối/chưa kết nối), KHÔNG
+     dùng làm trang trí chung chung. Viền đôi + nghiêng nhẹ mô phỏng dấu mộc đóng tay,
+     chữ thường (không viết hoa) — tránh kiểu nhãn ALL-CAPS kẻ khoảng chung chung. */
+  .stamp {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    padding: 0.3rem 0.7rem;
+    border: 1.5px solid currentColor;
+    border-radius: 4px;
+    font-weight: 600;
+    font-size: 0.75rem;
+    line-height: 1;
+    transform: rotate(-1.5deg);
+    box-shadow: inset 0 0 0 2.5px color-mix(in srgb, currentColor 18%, transparent);
+    white-space: nowrap;
   }
 
   .scrollbar-thin::-webkit-scrollbar {

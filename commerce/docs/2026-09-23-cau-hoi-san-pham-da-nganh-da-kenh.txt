@@ -1,0 +1,542 @@
+TRẢ LỜI BỘ CÂU HỎI THIẾT KẾ SẢN PHẨM — COMMERCE (đa cửa hàng, đa ngành, đa kênh)
+Ngày: 2026-09-23
+Phạm vi: commerce/ (Python/FastAPI) — không bao gồm backend/ + bridge/ (hệ RAG Zalo, sản phẩm khác).
+
+CÁCH ĐỌC FILE NÀY
+- Mỗi câu trả lời bắt đầu bằng phần "Hiện trạng trong code" khi có thể xác minh trực tiếp
+  bằng cách đọc mã nguồn — có trích dẫn file:dòng. Đây là quan sát, không phải suy đoán.
+- Phần "[Chưa xác định trong code]" đánh dấu những câu KHÔNG có câu trả lời trong repo hiện
+  tại — đây là quyết định sản phẩm/nghiệp vụ, chỉ bạn mới quyết được. Tôi không tự bịa ra
+  quyết định đó; tôi liệt kê các phương án và đánh dấu rõ [Inference]/[Speculation] cho phần
+  đề xuất, để bạn chọn chứ không phải để coi là đã chốt.
+- Phần pháp lý/chính sách nền tảng (mục H) tôi không có quyền truy cập trực tiếp văn bản
+  pháp luật hiện hành hay chính sách Facebook/Zalo mới nhất trong phiên làm việc này, nên
+  đánh dấu [Cần tra cứu/Unverified] thay vì trả lời như thể đã xác minh.
+
+================================================================================
+A. MÔ HÌNH ĐA CỬA HÀNG
+================================================================================
+
+A1. "Cửa hàng" là gì — một thương hiệu, một chi nhánh, hay một page/OA? Một chủ có nhiều
+cửa hàng không?
+
+Hiện trạng trong code:
+- Một "store" (commerce/app/stores.py:1-13) = một đơn vị độc lập có: catalog riêng, tối đa
+  1 kênh/loại (Facebook/Zalo OA/Zalo cá nhân), tone/policy riêng, và toàn bộ đơn hàng/hội
+  thoại lọc theo store_id — cách ly ở mức "một cấu hình bán hàng", gần với khái niệm
+  "một chi nhánh/một page" hơn là "một thương hiệu" (một thương hiệu có nhiều store vẫn được,
+  nhưng code không có khái niệm "thương hiệu" bao ngoài store).
+- Có field `tenant_id` trên mỗi store (app/stores.py:275, app/repository.py) nhưng hiện tại
+  MỌI store đều bị gán cứng `tenant_id = "tenant-main"` (app/stores.py:250, 275) — tức là
+  khái niệm "chủ" (tenant/owner) đã có chỗ trong schema nhưng CHƯA có logic thật nào dùng nó
+  (không có bảng user, không có đăng nhập, không có "chủ A sở hữu store X, Y"). Nói cách
+  khác: một chủ có nhiều store là điều schema *cho phép về mặt dữ liệu* nhưng hệ thống hiện
+  tại không có cách nào để một người đăng nhập và chỉ thấy đúng các store của mình — API admin
+  hiện trả về/thao tác trên TẤT CẢ store không phân biệt chủ.
+
+[Chưa xác định trong code] Bạn cần quyết định: "cửa hàng" trong sản phẩm của bạn tương ứng
+1-1 với gì (1 page Facebook, hay 1 địa điểm vật lý, hay 1 thương hiệu)? Nếu một chủ có nhiều
+chi nhánh dùng chung 1 page nhưng khác kho/nhân viên, hay ngược lại nhiều page cùng 1 chi
+nhánh — mô hình store hiện tại (1 store = tối đa 1 page/loại kênh) không cover được, cần mở
+rộng.
+
+A2. Dữ liệu giữa các cửa hàng cách ly hoàn toàn hay dùng chung (khách hàng, sản phẩm)?
+
+Hiện trạng trong code:
+- Cách ly hoàn toàn ở mức những gì đã hiện thực: sản phẩm (`repository.list_products(store_id)`),
+  đơn hàng (`orders.store_id`, mọi query lọc theo store_id — app/repository.py:483-500),
+  session hội thoại (khoá theo `(store_id, channel, sender_id)` — xem D/E bên dưới).
+- KHÔNG có khái niệm "khách hàng" như một thực thể độc lập, dùng chung hay không — mỗi đơn
+  hàng chỉ lưu tên/SĐT/địa chỉ snapshot tại thời điểm đặt (app/repository.py:490-495), không
+  có bảng `customers` để hỏi "khách này đã mua ở store khác chưa". Vì vậy câu hỏi "dùng chung
+  khách hàng giữa các store" hiện tại không áp dụng được — không có nơi nào để chia sẻ.
+
+[Chưa xác định trong code] Nếu về sau bạn muốn 1 khách hàng (số điện thoại) được nhận diện
+xuyên nhiều store thuộc cùng 1 chủ (ví dụ tích điểm toàn hệ thống), cần thêm bảng customer
+độc lập với store_id — hiện chưa có.
+
+A3. Phân quyền: chủ hệ thống / chủ cửa hàng / nhân viên — ai thấy gì, sửa gì?
+
+Hiện trạng trong code:
+- Không tìm thấy bất kỳ cơ chế đăng nhập, vai trò, hay quyền hạn nào trong `commerce/app/`
+  (đã rà `main.py`, `stores.py`, `repository.py`, `engine.py`, `assistant.py` bằng grep các
+  từ khoá role/permission/employee/nhan_vien/staff/auth/login/password/jwt — không có kết
+  quả liên quan). API `/api/admin/stores*` hiện KHÔNG có xác thực — bất kỳ ai gọi được vào
+  cổng 8200 đều thấy/sửa được mọi store, mọi kênh (trừ secret không echo lại, xem
+  `_channel_public()` trong main.py theo CLAUDE.md).
+- Đây là một khoảng trống bảo mật thật sự nếu admin UI này được public ra ngoài mạng nội bộ,
+  không chỉ là câu hỏi UX.
+
+[Chưa xác định trong code] Ba việc cần quyết: (1) có bao nhiêu cấp vai trò và mỗi cấp thấy/
+sửa được gì, (2) cơ chế đăng nhập (email/mật khẩu, SSO, OTP...), (3) có làm trước khi admin
+UI ra khỏi localhost hay không — [Speculation] về mặt rủi ro: nếu admin UI dự định deploy
+public trong thời gian gần, đây nên là việc ưu tiên cao hơn phần lớn câu hỏi khác trong danh
+sách này, vì hiện tại ai cũng đọc/sửa được token của mọi cửa hàng.
+
+A4. Một nhân viên phục vụ nhiều cửa hàng cùng lúc được không?
+
+Hiện trạng trong code: không áp dụng được — không có khái niệm nhân viên/tài khoản đăng nhập
+nào cả (xem A3). [Chưa xác định trong code].
+
+A5. Xoá/tạm dừng một cửa hàng thì đơn hàng và hội thoại đang dở xử lý ra sao?
+
+Hiện trạng trong code:
+- Tạm dừng (`status = "paused"`): `engine.handle_or_paused()` kiểm tra `stores.get(store_id)
+  .get("status") == "paused"` (app/engine.py:611 theo grep) và chặn TOÀN BỘ xử lý bot cho
+  store đó — nhưng đây là chặn ở tầng entrypoint (`/webhook`, `/simulator/send`,
+  `/channels/zalo/message`), tức là khách nhắn vào sẽ không nhận được phản hồi nào (không rõ
+  từ code liệu có gửi một thông báo "cửa hàng tạm ngưng" cho khách hay im lặng hoàn toàn —
+  cần đọc thêm phần trả về của `handle_or_paused` để xác nhận, tôi chưa đọc phần đó). Các
+  session/giỏ hàng đang dở trong RAM (`SESSIONS`) KHÔNG bị xoá khi pause — chúng chỉ đơn giản
+  không được xử lý tiếp, và nếu store được active lại, khách quay lại đúng state cũ (vì
+  SESSIONS là in-memory, không gắn với status).
+- Xoá store: `delete_store()` (app/stores.py:339-343) chặn xoá store builtin
+  (`is_builtin` → raise ValueError), nhưng với store do người dùng tạo thì gọi thẳng
+  `repository.delete_store_row(store_id)` — tôi chưa đọc phần thân hàm này trong
+  repository.py để xác nhận nó có cascade xoá `orders`/`products`/`channels` của store đó
+  hay không, hoặc có chặn xoá khi còn đơn hàng "Chờ xác nhận" hay không. [Chưa xác minh đầy
+  đủ — cần đọc `repository.delete_store_row`] Nếu chưa có ràng buộc, xoá 1 store đang có đơn
+  hàng dở sẽ khiến đơn hàng đó orphan (còn dữ liệu order với store_id trỏ đến store không
+  còn tồn tại) hoặc bị xoá mất — cả hai đều là rủi ro dữ liệu cần bạn quyết định hành vi mong
+  muốn (chặn xoá nếu còn đơn chưa xử lý xong, hay cho xoá nhưng giữ lại lịch sử đơn).
+
+================================================================================
+B. "ĐA NGÀNH"
+================================================================================
+
+B1. Bạn dùng schema thuộc tính động hay template theo ngành?
+
+Hiện trạng trong code:
+- Hiện tại là TEMPLATE theo ngành, không phải schema thuộc tính động tổng quát. Cụ thể: mỗi
+  store có đúng MỘT trục biến thể (`variant_mode`: "so" | "nhan" | "khong_co" —
+  app/stores.py:280-285), không phải nhiều thuộc tính kết hợp tự do (vd không có "màu × size"
+  đồng thời — CLAUDE.md tự liệt bảng ngành/cấu trúc sản phẩm và mô tả điều này khớp với đây).
+  `variant_mode="so"` = dải số có min/max (vd size giày 24–46), `"nhan"` = danh sách nhãn tự
+  đặt (vd S/M/L/XL), `"khong_co"` = chỉ số lượng, không biến thể.
+- Việc thêm ngành mới nếu ngành đó chỉ cần MỘT trong 3 template trên (số lượng khác nhau,
+  nhãn khác nhau) là cấu hình thuần (đổi `variant_mode`/`variant_min`/`variant_max`/
+  `variant_labels` qua `create_store`/`update_store`, không sửa code — app/stores.py:264-336).
+  Nhưng nếu ngành cần NHIỀU trục thuộc tính cùng lúc (F&B: size ly × topping × mức đường/đá
+  như CLAUDE.md nêu), template hiện tại không biểu diễn được — đây thực sự là giới hạn kiến
+  trúc, không phải thiếu cấu hình.
+
+[Chưa xác định trong code] Đây đúng là điểm rủi ro lớn nhất của sản phẩm như bạn/AI trước đã
+nhận định. [Inference — đề xuất kỹ thuật, không phải quyết định đã chốt]: nếu bạn cần mở rộng
+sang ngành nhiều-thuộc-tính (F&B combo, topping...), lối đi ít phá vỡ code hiện tại nhất là
+thêm một `variant_mode` mới kiểu "thuộc tính đa trục" (list các {tên trục, danh sách giá trị,
+phụ phí nếu có}) và viết thêm 1 nhánh xử lý trong `assistant._parse_sizes`/
+`engine._extract_size_qty` cho mode đó — tức là vẫn đi theo hướng "thêm template", không phải
+đổi hẳn sang schema thuộc tính động tự do (schema tự do sẽ đòi viết lại phần lớn engine.py vì
+state machine hiện tại (`QTY_INPUT`/`SIZE_INPUT`) giả định đúng 1 biến thể). Đây là đánh đổi
+effort mà chỉ bạn cân được theo roadmap ngành nào ưu tiên trước.
+
+B2. Bot hỏi khách theo kịch bản cố định hay sinh câu hỏi theo cấu hình sản phẩm?
+
+Hiện trạng trong code:
+- Kịch bản CỐ ĐỊNH (state machine `MENU → CATEGORY → QTY_INPUT/SIZE_INPUT → INFO → PAYMENT →
+  REVIEW`, app/engine.py), không phải sinh động theo cấu hình. Cấu hình per-store chỉ đổi
+  NỘI DUNG câu hỏi trong từng bước cố định đó (vd có hỏi size hay không tuỳ `variant_mode`,
+  tone câu trả lời tuỳ `tone`/`custom_prompt`), chứ không đổi SỐ BƯỚC hay THỨ TỰ bước.
+- Phần "tư vấn tự do" (câu hỏi ngoài kịch bản, giá/ship/chính sách...) đi qua
+  `assistant.answer_retail()` — đây là phần "sinh câu trả lời" (qua LLM Groq/Gemini + fallback
+  local), nhưng vẫn là TRẢ LỜI, không phải chủ động ĐẶT câu hỏi theo cấu hình sản phẩm.
+
+B3. Thêm một ngành mới thì phải code hay chỉ cấu hình?
+
+Hiện trạng trong code — trả lời có điều kiện, đã nêu ở B1: chỉ cấu hình NẾU ngành mới khớp
+được với 1 trong 3 `variant_mode` sẵn có + danh mục/sản phẩm generic (category matching theo
+CLAUDE.md là generic, không hardcode vocabulary — khớp với việc thêm ngành "chỉ đổi dữ liệu
+category/product của store, không đổi code matching"). Phải CODE nếu ngành đó cần: (a) một
+kiểu biến thể mới ngoài số/nhãn/không-có, (b) luồng hội thoại khác state machine hiện tại (vd
+đặt lịch theo giờ cho ngành dịch vụ — CLAUDE.md liệt "dịch vụ: theo giờ, theo lịch, không tồn
+kho" — cái này rõ ràng không khớp bất kỳ state nào hiện có, vì toàn bộ engine giả định
+"sản phẩm có sizes, đặt số lượng, giao hàng vật lý").
+
+================================================================================
+C. KÊNH FACEBOOK VÀ ZALO
+================================================================================
+
+C1. Định danh khách: cùng một người nhắn ở cả FB và Zalo có gộp thành một khách không? Gộp
+bằng gì?
+
+Hiện trạng trong code:
+- KHÔNG gộp. `engine.py` khoá session theo `(store_id, channel, sender_id)` — CLAUDE.md nói
+  rõ lý do: "một Facebook PSID và một Zalo user id trùng nhau ngẫu nhiên (đều là chuỗi số,
+  khác không gian id) không được share giỏ hàng". Số điện thoại được thu thập MỖI đơn hàng
+  (app/engine.py — thu thập lại "customer" mỗi lần checkout, app/engine.py:368 comment "thu
+  thập lại từ đầu cho rõ ràng") nhưng KHÔNG được dùng để tra cứu/gộp lịch sử — không có bảng
+  customer để join theo SĐT giữa các đơn từ 2 kênh khác nhau.
+
+[Chưa xác định trong code] Nếu bạn muốn gộp khách theo SĐT xuyên kênh (vd để 1 nhân viên thấy
+"khách này đã từng đặt bên Zalo"), đây là tính năng mới cần bảng customer + logic match theo
+SĐT chuẩn hoá (số điện thoại VN có nhiều định dạng: 0xxx, +84xxx, 84xxx — cần chuẩn hoá trước
+khi so khớp, hiện code không làm việc này ở đâu cả).
+
+C2. (Ghi chú về giới hạn nền tảng: cửa sổ 24h của Facebook, quota tin nhắn Zalo OA)
+
+[Cần tra cứu/Unverified] Tôi không xác minh được chính sách hiện hành của Facebook Messenger
+Platform (cửa sổ 24h nhắn tin chủ động) hay quota Zalo OA trong phiên làm việc này — đây là
+chính sách của bên thứ ba có thể thay đổi, cần tra tài liệu chính thức mới nhất tại thời điểm
+triển khai, tôi không nên đoán con số. Về mặt code: hiện tại KHÔNG có logic nào kiểm tra cửa
+sổ 24h hay quota trước khi gửi tin (không tìm thấy trong `main.py`/`messenger.py`/
+`zalo_oa.py` qua các lần grep) — nếu nghiệp vụ "nhắc khách chốt đơn" hay "báo đơn đã giao"
+được chủ động gửi ngoài luồng khách nhắn trước, đây là rủi ro thật (tin có thể bị nền tảng từ
+chối gửi hoặc vi phạm chính sách) chứ không phải giả thuyết suông.
+
+C3. Một cửa hàng nối được nhiều page/OA không? Một page nối được nhiều cửa hàng không?
+
+Hiện trạng trong code:
+- Một store nối tối đa 1 page/1 OA/1 tài khoản Zalo cá nhân — `channels` là dict keyed theo
+  loại kênh chứ không phải list (app/stores.py:37-39, xác nhận rõ trong CLAUDE.md và trong
+  chính docstring app/stores.py: "channels là dict keyed theo loại kênh, KHÔNG phải list
+  nhiều tài khoản cùng loại"). Vậy: KHÔNG, một store không nối được 2 page Facebook cùng lúc.
+- Một page/OA cũng KHÔNG được dùng cho 2 store: `set_channel()`/`create_store()`/
+  `update_store()` đều raise ValueError nếu `page_id`/`oa_id` đã thuộc store khác
+  (app/stores.py:187-195, 268-271, 311-317 — `external_id_owner()` kiểm tra đơn trị 2 chiều).
+  Đây là ràng buộc cứng, không phải mặc định có thể tắt qua cấu hình.
+
+[Chưa xác định trong code] Nếu mô hình nghiệp vụ thật của bạn cần "1 page phục vụ nhiều
+chi nhánh" hoặc "1 cửa hàng có 2 page (page chính + page khuyến mãi)" — kiến trúc hiện tại
+chặn cả hai chiều này bằng thiết kế, không phải bug; đổi lại sẽ cần đổi field `channels` từ
+dict sang list và viết lại phần routing theo external_id (route theo page_id hiện giả định
+1-1).
+
+C4. Mất kết nối token/OA hết hạn thì hệ thống xử lý và báo cho ai?
+
+Hiện trạng trong code:
+- Không tìm thấy cơ chế phát hiện token hết hạn/health-check chủ động, và không có cơ chế
+  "báo cho ai" (không có notification/email/alert nào trong app/*.py qua các lần grep ở
+  mục F bên dưới cũng không thấy "health"/"alert" liên quan token). `channel_connected()`
+  (app/stores.py:209-223) chỉ kiểm tra "có đủ field cấu hình" (page_id + page_token tồn tại,
+  hay oa_id + access_token tồn tại) — đây là kiểm tra tĩnh "đã điền form chưa", KHÔNG phải
+  gọi API Facebook/Zalo thật để xác nhận token còn hợp lệ. Nếu Facebook thu hồi page_token
+  giữa chừng, `channel_connected()` vẫn báo "đã kết nối" cho đến khi một request gửi tin thật
+  sự thất bại.
+- Với Zalo cá nhân: trạng thái đăng nhập thật lấy live từ sidecar `zalo-bridge`, không lưu ở
+  commerce (comment rõ trong app/stores.py:220-222) — nghĩa là admin UI của commerce một mình
+  nó không thể biết phiên Zalo cá nhân còn sống hay đã bị đăng xuất, phải hỏi sidecar.
+
+[Chưa xác định trong code] Cần quyết: có làm health-check chủ động (gọi thử API nền tảng định
+kỳ) không, và kênh báo lỗi cho ai (admin UI hiển thị badge đỏ? gửi email/Zalo cho chủ cửa
+hàng?) — hiện chưa có gì cả, đây là tính năng phải xây từ đầu.
+
+================================================================================
+D. LUỒNG ĐẶT ĐƠN QUA BOT
+================================================================================
+
+D1. Khách tìm sản phẩm bằng cách nào — gõ tên, chọn menu, gửi ảnh, hay bot gợi ý?
+
+Hiện trạng trong code:
+- Chọn menu qua nút bấm (quick reply, state `MENU`/`CATEGORY` trong engine.py) VÀ gõ tên/mã
+  sản phẩm tự do (rơi vào `assistant.answer_retail()` khi không khớp payload nút — CLAUDE.md:
+  "Free text ... falls through to assistant.answer_retail()", và `_retail_match_codes` khớp
+  theo mã sản phẩm/từ khoá). KHÔNG hỗ trợ khách gửi ẢNH để tìm sản phẩm — CLAUDE.md nói rõ:
+  ảnh khách gửi được tải về nhưng KHÔNG được chuyển tiếp cho `commerce` vì `engine.handle()`
+  không có tham số ảnh (giới hạn có chủ đích, không phải bug).
+
+D2. Có giỏ hàng nhiều món không, hay mỗi lần một món?
+
+Hiện trạng trong code: có giỏ hàng nhiều món — `sess["cart"]` là list, state `CART` cho phép
+thêm nhiều dòng trước khi sang `INFO`/thanh toán (app/engine.py, các dòng có `sess["state"] =
+"CART"`, ví dụ dòng 283, 327).
+
+D3. Khách đổi ý giữa chừng ("thôi đổi size khác") — bot xử lý thế nào?
+
+Hiện trạng trong code: tôi xác nhận được có đường quay lại menu/giỏ hàng từ nhiều state (các
+dòng gán lại `sess["state"] = "MENU"`/`"CATEGORY"` rải trong engine.py, ví dụ dòng 632, 642,
+648, 670, 688, 702) — tức là có cơ chế huỷ-quay-lại ở mức state machine. Tôi CHƯA đọc chi tiết
+từng nhánh input để xác nhận CHÍNH XÁC câu nói tự nhiên nào (vd đúng câu "thôi đổi size khác")
+được nhận diện là lệnh quay lại hay bị rơi xuống AI tư vấn rồi trả lời sai luồng — cần đọc kỹ
+`engine.py` phần state `SIZE_INPUT`/`QTY_INPUT` (dòng 708-791) nếu bạn cần câu trả lời chính
+xác 100% cho câu này; tôi không muốn suy đoán hành vi cụ thể ở đây.
+
+D4. Khách nhắn kiểu tự nhiên, sai chính tả, viết tắt — ngưỡng nào thì bot bỏ cuộc?
+
+Hiện trạng trong code: không có "ngưỡng bỏ cuộc" tường minh dạng số (không có confidence score
+threshold nào tôi tìm thấy). Cơ chế thực tế là chuỗi fallback: khớp payload nút chính xác →
+khớp alias/exact-string (đã qua chuẩn hoá NFC, xem "Known encoding gotcha" trong CLAUDE.md) →
+`assistant.answer_retail()` gọi Groq → Gemini → nếu cả hai LLM lỗi thì fallback từ khoá cục bộ
+(`_retail_local_answer`/`_retail_match_codes`). Bot không có khái niệm "bỏ cuộc và im lặng" —
+luôn trả lời gì đó, kể cả khi là câu trả lời chung chung từ local fallback khi không khớp từ
+khoá nào. Vậy "ngưỡng bỏ cuộc" hiện tại = 0 (bot luôn cố trả lời), không có bước "chuyển người
+thật vì bot không hiểu" tự động theo tín hiệu NLU — chỉ có chuyển do khiếu nại (xem D6).
+
+D5. Bot chốt đơn luôn hay cần người duyệt?
+
+Hiện trạng trong code: bot CHỐT ĐƠN LUÔN, không có bước duyệt của người trước khi đơn được ghi
+nhận — `create_retail_order()` insert thẳng vào bảng `orders` với status mặc định
+`"Chờ xác nhận"` (app/repository.py:493) ngay khi khách hoàn tất state `REVIEW`/xác nhận
+(app/engine.py:428-441) — "Chờ xác nhận" ở đây là NHÃN trạng thái, không phải một bước chặn
+đơn lại chờ người bấm duyệt rồi mới lưu; đơn đã tồn tại trong DB trước khi có ai duyệt.
+
+[Chưa xác định trong code] Đây đúng là quyết định vận hành lớn nhất như câu hỏi gốc nêu.
+Hiện trạng nghiêng về "bot tự chốt, người chỉ xử lý sau" — nếu bạn muốn đổi sang "bot thu thập
+xong rồi CHỜ người duyệt mới coi là đơn hợp lệ", cần thêm 1 status trung gian thật sự chặn
+(hiện `"Chờ xác nhận"` không chặn gì, đơn đã là 1 row order đầy đủ ngay lập tức) và đổi UI
+admin để duyệt/từ chối trước khi... (tuỳ bạn định nghĩa "hợp lệ" nghĩa là gì trong hệ thống).
+
+D6. Bàn giao bot → người thật: khi nào, ai nhận, khách có biết mình đang nói với ai không?
+
+Hiện trạng trong code: cơ chế bàn giao hiện có DUY NHẤT là qua khiếu nại — CLAUDE.md: khi LLM
+trả về `is_complaint=true`, hệ thống gọi `engine._flag_recent_order` để gắn cờ đơn gần nhất
+của khách đó, cờ này hiện lên tab Orders trong admin UI cho NGƯỜI (nhân viên/chủ) tự vào xử lý
+— không phải chuyển tiếp real-time hội thoại cho người, mà là "đánh dấu để người tự vào xem
+sau". Khách KHÔNG được thông báo là mình đang nói chuyện với bot hay người — bot vẫn tự trả
+lời (một câu xin lỗi) ngay cả khi đã flag đơn, không có bước "chuyển giao, tạm dừng bot, người
+thật vào chat trực tiếp real-time" nào được hiện thực.
+
+[Chưa xác định trong code] Nếu bạn cần bàn giao real-time thật sự (bot dừng lại, người vào gõ
+tiếp trong cùng cuộc hội thoại, khách biết), đây là tính năng mới hoàn toàn — hiện tại không
+có kênh nào cho người ngoài gõ vào 1 session `SESSIONS[...]` đang chạy.
+
+================================================================================
+E. TỒN KHO, GIÁ, ĐƠN HÀNG
+================================================================================
+
+E1. Bot có thấy tồn kho thật không? Hết hàng thì báo hay vẫn nhận đơn?
+
+Hiện trạng trong code:
+- Bot đọc số lượng tồn (`sizes: {size: count}` trên mỗi sản phẩm) để BÁO còn/hết
+  (app/assistant.py:378-380, app/engine.py:211-219: liệt "còn size" từ `sizes[sz] > 0`, và
+  dòng 257-259 kiểm tra `stock - _qty_already_in_cart(...)` trước khi cho thêm vào giỏ, chặn
+  nếu vượt tồn hiện có kể cả phần đã có trong giỏ).
+- NHƯNG: xác nhận qua `repository.create_order()` (app/repository.py:483-499) — việc tạo đơn
+  hàng KHÔNG hề UPDATE số lượng tồn kho của sản phẩm. Số tồn chỉ là con số tĩnh do chủ cửa
+  hàng nhập/sửa qua admin, không tự trừ khi có đơn mới. Vậy: bot có kiểm tra tồn tại-thời-điểm-
+  đọc để chặn đặt vượt số hiện có trong giỏ CỦA CHÍNH KHÁCH ĐÓ, nhưng không có khái niệm tồn
+  kho "sống" cập nhật theo đơn hàng thật.
+
+E2. Có giữ hàng khi khách đang đặt không? Hai khách cùng đặt món cuối cùng thì ai được?
+
+Hiện trạng trong code — hệ quả trực tiếp từ E1: KHÔNG giữ hàng, và KHÔNG có khoá tránh đặt
+trùng giữa 2 khách khác nhau. Vì tồn kho không bị trừ khi tạo đơn, hai khách A và B cùng đặt
+"món cuối cùng" (tồn = 1) đều sẽ được hệ thống chấp nhận đơn — không ai bị chặn ở tầng dữ
+liệu, vì kiểm tra tồn (E1) chỉ so với giỏ hàng của CHÍNH người đó (`_qty_already_in_cart`), không
+so với đơn của người khác đã tạo. Đây là một race condition thật, không phải giả thuyết — xác
+nhận được bằng cách đọc thấy `create_order` không đụng đến bảng sản phẩm/tồn kho.
+
+[Chưa xác định trong code] Đây là gap kỹ thuật cần vá nếu tồn kho thực sự thấp/dễ hết
+(vd hàng limited): cần (a) trừ tồn khi tạo đơn (trong cùng transaction với insert order để
+tránh race), (b) quyết định khi hết đúng lúc 2 người đặt cùng lúc thì ai được — "ai đặt trước
+được, người sau báo hết và có thể hoàn tiền/đổi món" là cách phổ biến nhưng đây là lựa chọn
+nghiệp vụ của bạn, không phải điều tôi nên tự quyết.
+
+E3. Giá theo khách (khách sỉ/lẻ), theo cửa hàng, theo kênh — có khác nhau không?
+
+Hiện trạng trong code:
+- Theo cửa hàng: CÓ — giá là thuộc tính của product trong catalog của từng store, mỗi store
+  catalog độc lập nên đương nhiên khác nhau giữa các store.
+- Theo khách (sỉ/lẻ): schema sản phẩm CÓ 2 field `retail` và `wholesale`
+  (`_menu_item()` app/stores.py:258-261: `"retail": int(price), "wholesale": int(price)`) —
+  NHƯNG cả hai được khởi tạo BẰNG NHAU (cùng gán từ `price` truyền vào) khi tạo sản phẩm qua
+  `add_menu_item`/`create_store`, và tôi không tìm thấy trong `engine.py` bất kỳ logic nào
+  ĐỌC field `wholesale` để áp giá khác cho khách sỉ trong luồng đặt hàng qua bot (giỏ hàng
+  dùng giá nào cần xác minh thêm tại nơi tính `subtotal`, nhưng không thấy điều kiện nào phân
+  biệt "khách này là khách sỉ") — nói cách khác trường `wholesale` hiện là placeholder trong
+  schema, chưa có luồng nghiệp vụ nào kích hoạt nó qua bot.
+- Theo kênh: KHÔNG thấy field/logic giá theo kênh (facebook vs zalo) ở đâu — sản phẩm dùng
+  chung 1 giá cho mọi kênh trong cùng 1 store.
+
+[Chưa xác định trong code] Nếu bạn cần giá sỉ/lẻ hoạt động thật (vd theo ngưỡng số lượng, hay
+theo tag khách hàng), cần thêm logic quyết định "khách này thuộc nhóm nào" (hiện không có khái
+niệm nhóm khách/khách hàng thân thiết) và nhánh chọn `wholesale` vs `retail` trong lúc tính
+giỏ hàng — hiện chưa có.
+
+E4. Khuyến mãi, mã giảm giá, freeship — bot có áp được không?
+
+Hiện trạng trong code: KHÔNG. Grep toàn bộ `app/*.py` cho discount/coupon/promo/khuyen_mai/
+giam_gia/freeship chỉ ra đúng 1 kết quả — một câu text tĩnh mô tả chính sách
+("đơn từ 2 đôi thường được freeship (tuỳ chương trình)" — app/stores.py:21), tức là chỉ là
+NỘI DUNG TRẢ LỜI khi khách hỏi về ship, không phải logic thực sự tính lại subtotal. Không có
+bảng mã giảm giá, không có field discount trên order/product, không có logic trừ tiền theo
+điều kiện nào trong `engine.py`/`repository.py`. Đây là tính năng chưa tồn tại, không phải bị
+ẩn ở đâu đó khác trong repo.
+
+E5. Vòng đời đơn: các trạng thái, ai chuyển trạng thái, hủy/sửa/hoàn xử lý ra sao?
+
+Hiện trạng trong code:
+- `status` là cột TEXT tự do (app/repository.py:141 `status TEXT NOT NULL`), khởi tạo cứng là
+  chuỗi `"Chờ xác nhận"` khi tạo đơn (app/repository.py:493), và đổi qua
+  `repository.set_order_status(oid, status)` (app/repository.py:523-525) — hàm này nhận
+  BẤT KỲ chuỗi nào làm status, KHÔNG có enum/whitelist các trạng thái hợp lệ, không có kiểm
+  tra chuyển trạng thái nào được phép từ trạng thái nào (vd không chặn việc set thẳng từ
+  "Chờ xác nhận" sang "Đã giao" bỏ qua các bước giữa, vì code không định nghĩa "các bước giữa"
+  ở tầng dữ liệu — tôi grep không thấy danh sách hằng số trạng thái nào trong `app/*.py`, chỉ
+  thấy đúng chuỗi mặc định "Chờ xác nhận").
+- "Ai chuyển trạng thái": bất kỳ ai gọi được `stores.set_status()`/endpoint admin tương ứng
+  trong `main.py` (chưa xác minh route cụ thể, nhưng theo A3 thì API admin không có auth) —
+  tức là hiện tại không phân biệt "chỉ chủ cửa hàng mới được đổi trạng thái đơn của mình".
+- Huỷ/sửa/hoàn: KHÔNG có hàm riêng nào cho huỷ/sửa/hoàn — nếu có, chúng đang được mô phỏng
+  bằng cách set `status` thành một chuỗi tuỳ ý (vd "Đã huỷ") qua cùng 1 hàm `set_status`,
+  không có logic nghiệp vụ đi kèm (vd hoàn không tự động cộng lại tồn kho — vì tồn kho vốn
+  không bị trừ khi tạo đơn, xem E1).
+
+[Chưa xác định trong code] Cần định nghĩa tường minh: danh sách trạng thái hợp lệ, ma trận
+chuyển trạng thái được phép, và ai (vai trò nào) được phép chuyển — hiện là "trường text tự do,
+ai cũng sửa được, sửa gì cũng được".
+
+E6. Thanh toán: COD, chuyển khoản, link thanh toán? Đối soát thế nào?
+
+Hiện trạng trong code: chỉ có COD và chuyển khoản dưới dạng LỰA CHỌN VĂN BẢN khách bấm/gõ
+(`"PAY::COD khi nhận"` / `"PAY::Chuyển khoản"` — app/engine.py:392), lưu vào cột `payment`
+dạng text tự do (app/repository.py:140). KHÔNG có tích hợp cổng thanh toán/link thanh toán
+thật (không có API key/webhook của bất kỳ payment gateway nào trong repo), và KHÔNG có cơ chế
+đối soát (không có bảng giao dịch, không đánh dấu "đã nhận tiền chưa" tách biệt với
+`status` đơn hàng) — nếu khách chọn "Chuyển khoản", hệ thống chỉ ghi nhận LỜI HỨA của khách
+qua bot, không xác nhận được tiền đã về hay chưa.
+
+E7. Vận chuyển: tự giao hay nối API nhà vận chuyển?
+
+Hiện trạng trong code: tự giao/tự thoả thuận — phí ship chỉ là text mô tả tĩnh trong policy
+của từng store ("Phí ship tính khi chốt đơn theo địa chỉ" — app/stores.py:20-21, 28-29,
+app/engine.py:343: "Tạm tính ... (chưa gồm phí ship)"), không có tích hợp API bất kỳ đơn vị
+vận chuyển nào (GHN/GHTK/Ahamove...) — subtotal trả về cho khách luôn CHƯA gồm ship, phí ship
+được xử lý ngoài hệ thống (nhân viên tự tính/tự báo khi giao).
+
+E8. Đơn từ bot đổ về đâu — hệ thống này là nơi quản lý đơn cuối cùng, hay chỉ trung gian rồi
+đẩy sang phần mềm bán hàng/ERP của cửa hàng?
+
+Hiện trạng trong code: đơn hàng được lưu VÀ dừng lại trong chính DB của commerce
+(`commerce.db`, bảng `orders`) — không có bất kỳ webhook/export/tích hợp đẩy đơn sang hệ
+thống bên ngoài nào (không tìm thấy gọi HTTP ra ngoài cho mục đích đồng bộ đơn trong
+`app/*.py`). Vậy hiện trạng: commerce đang đóng vai trò "nơi quản lý đơn cuối cùng" trên thực
+tế (vì không có nơi nào khác đơn được đẩy tới), dù đây có thể không phải định vị bạn MUỐN cho
+sản phẩm về lâu dài.
+
+[Chưa xác định trong code] Đây là câu hỏi định vị sản phẩm quan trọng nhất trong mục E như
+chính bộ câu hỏi gốc đã nhấn mạnh — quyết định này ảnh hưởng đến toàn bộ scope (có cần làm
+tồn kho/thanh toán/vận chuyển hoàn chỉnh hay không, hay chỉ cần đủ để đẩy sang ERP khác xử lý
+tiếp). Tôi không có căn cứ nào trong code hay hội thoại trước đó để suy ra bạn đã chọn hướng
+nào — cần bạn quyết.
+
+================================================================================
+F. "SỨC KHOẺ BOT"
+================================================================================
+
+F1. Định nghĩa "sức khoẻ" là gì?
+
+Hiện trạng trong code: KHÔNG có bất kỳ khái niệm/bảng/endpoint nào tên "health"/"metric"/
+"dashboard"/"stat" liên quan đến đo lường hiệu quả bot trong `app/*.py` (đã grep, kết quả duy
+nhất liên quan là cột `status` của tenant/store/order — khác nghĩa hoàn toàn với "sức khoẻ
+bot" mà câu hỏi đang nói tới). Không có log tỷ lệ chốt đơn, tỷ lệ chuyển người thật (ngoài
+cờ khiếu nại đơn lẻ ở D6), thời gian phản hồi, hay tỷ lệ hiểu sai được thu thập ở đâu cả.
+
+[Chưa xác định trong code] Đây hoàn toàn là tính năng mới cần xây từ đầu, kể cả định nghĩa.
+[Speculation — không phải đề xuất đã chốt, chỉ liệt để bạn cân nhắc] Các chỉ số hay dùng cho
+bot bán hàng: tỷ lệ hội thoại có đơn hàng / tổng hội thoại, tỷ lệ rơi vào fallback LLM thứ 2
+hoặc local fallback (dấu hiệu Groq/Gemini quá tải — CLAUDE.md đã ghi nhận việc này XẢY RA
+THẬT trong vận hành, không phải giả thuyết), tỷ lệ đơn bị flag khiếu nại (D6) trên tổng đơn,
+thời gian từ lúc khách vào MENU đến lúc chốt đơn hoặc bỏ giữa chừng. Việc chọn chỉ số nào thật
+sự phản ánh "sức khoẻ" theo định nghĩa của bạn thì tôi không thể quyết thay.
+
+F2. Cửa hàng xem được chỉ số của riêng mình, còn admin xem toàn hệ thống — đúng không?
+
+[Chưa xác định trong code] Không thể trả lời — không có tính năng xem chỉ số nào tồn tại để
+mô tả phạm vi xem (xem F1). Về nguyên tắc phân quyền dữ liệu, mọi truy vấn hiện tại đều lọc
+theo `store_id` (đúng hướng "cửa hàng chỉ thấy dữ liệu của mình" nếu sau này có tầng phân
+quyền — xem A3), nhưng "admin xem toàn hệ thống" hiện cũng đúng theo nghĩa ngược: KHÔNG có
+phân quyền nào cả nên "ai cũng xem được toàn hệ thống" mới là hiện trạng thật (xem A3) — chưa
+có sự phân biệt "cửa hàng chỉ thấy của mình" như câu hỏi giả định.
+
+================================================================================
+G. ONBOARDING VÀ VẬN HÀNH
+================================================================================
+
+G1. Chủ cửa hàng tự tạo cửa hàng và nhập sản phẩm, hay bên bạn làm hộ?
+
+Hiện trạng trong code: kỹ thuật cho phép cả hai — có API `POST /api/admin/stores` +
+`add_menu_item()` (app/stores.py:346-353) dùng được để tự tạo/tự nhập qua admin UI
+(`commerce/admin/`). Nhưng vì KHÔNG có đăng nhập/phân quyền (A3), "chủ cửa hàng tự làm" hiện
+tại về mặt vận hành thực tế nghĩa là "phải được bên vận hành cấp quyền truy cập vào chính
+admin UI dùng chung" — không có concept tài khoản chủ cửa hàng riêng để họ tự đăng ký/tự vào.
+[Chưa xác định trong code] Đây là quyết định vận hành (mô hình self-service vs làm hộ), không
+phải giới hạn kỹ thuật cứng — nhưng làm self-service thật sẽ cần A3 (đăng nhập + phân quyền)
+trước.
+
+G2. Nhập sản phẩm bằng gì — tay, file Excel, hay nối từ hệ thống sẵn có?
+
+Hiện trạng trong code: chỉ có nhập TAY qua từng lời gọi API `add_menu_item` (1 sản phẩm/lần
+gọi) — không tìm thấy endpoint import hàng loạt (CSV/Excel) hay tích hợp đồng bộ từ hệ thống
+khác. Ngoại lệ: `app/catalog.py` (626 sản phẩm, theo CLAUDE.md là "machine-generated từ một
+lần scrape") chứng minh việc NẠP HÀNG LOẠT có làm được về mặt kỹ thuật (viết script Python
+sinh dict rồi nạp), nhưng đó là cách làm một lần thủ công của người phát triển, không phải một
+tính năng "import Excel" cho người dùng cuối tự dùng.
+
+G3. Chủ cửa hàng có tự sửa được kịch bản bot không, hay bên bạn cấu hình?
+
+Hiện trạng trong code: sửa được PHẦN NỘI DUNG qua `custom_prompt` và `policies` (field trên
+store, sửa qua `update_store()` — app/stores.py:307-336) — đây ảnh hưởng đến GIỌNG ĐIỆU/
+CHÍNH SÁCH bot trả lời (dùng trong `assistant.answer_retail()`), không phải KỊCH BẢN (số bước/
+trình tự state machine trong `engine.py`, xem B2) — kịch bản (thứ tự MENU→CATEGORY→...→REVIEW)
+là code cứng, không sửa được qua cấu hình dù là chủ cửa hàng hay bên vận hành, phải sửa
+`engine.py`.
+
+================================================================================
+H. TUÂN THỦ
+================================================================================
+
+H1. Dữ liệu cá nhân khách hàng (tên, SĐT, địa chỉ) lưu ở đâu, ai xem được, giữ bao lâu — theo
+Nghị định 13/2023 về bảo vệ dữ liệu cá nhân.
+
+Hiện trạng trong code (phần tôi xác minh được trực tiếp):
+- Lưu ở đâu: SQLite `commerce.db`, bảng `orders`, các cột `customer_name`, `customer_phone`,
+  `customer_address` dạng plaintext (app/repository.py:140-145) — CLAUDE.md xác nhận thêm:
+  credentials (`page_token`/`app_secret`/...) cũng lưu plaintext, cùng tiền lệ, không mã hoá
+  tại chỗ (dù thấy có file mới `app/crypto.py` chưa track trong git theo git status — tôi
+  CHƯA đọc nội dung file này nên không thể xác nhận nó đã áp dụng mã hoá cho dữ liệu khách
+  hàng hay chỉ cho secret kênh; cần đọc file đó riêng nếu bạn cần câu trả lời chính xác về
+  việc này).
+- Ai xem được: bất kỳ ai truy cập được API admin (không auth, xem A3) hoặc truy cập trực tiếp
+  file `commerce.db`.
+- Giữ bao lâu: KHÔNG có cơ chế xoá/hết hạn dữ liệu tự động nào (không tìm thấy TTL, cronjob,
+  hay endpoint xoá dữ liệu khách hàng theo yêu cầu).
+
+[Cần tra cứu/Unverified] Về nội dung pháp lý cụ thể của Nghị định 13/2023/NĐ-CP (nghĩa vụ với
+dữ liệu cá nhân: sự đồng ý, mục đích, thời hạn lưu trữ, quyền xoá của chủ thể dữ liệu, có cần
+đăng ký/thông báo xử lý dữ liệu hay không, mức phạt...) — tôi không có quyền truy cập văn bản
+pháp luật hiện hành để trích dẫn chính xác trong phiên làm việc này, và luật/nghị định có thể
+đã có văn bản hướng dẫn hoặc sửa đổi sau thời điểm kiến thức của tôi (huấn luyện đến 01/2026).
+Tôi không nên tự diễn giải nghĩa vụ pháp lý cụ thể ở đây. Đề xuất: tra Cổng thông tin điện tử
+Chính phủ hoặc hỏi bộ phận pháp lý/luật sư trước khi coi bất kỳ hành vi lưu trữ nào ở trên là
+"đã tuân thủ" — riêng phần kỹ thuật, hiện trạng thô là: plaintext, không phân quyền truy cập,
+không có cơ chế xoá theo yêu cầu — đây là 3 điểm [Speculation] nhiều khung pháp lý bảo vệ dữ
+liệu cá nhân (không riêng NĐ 13) thường yêu cầu xử lý, nên nhiều khả năng đáng được rà soát dù
+tôi không khẳng định chắc chắn đây có vi phạm cụ thể điều khoản nào hay không.
+
+H2. Chính sách của Facebook và Zalo về bot thương mại — cần kiểm tra để không bị khoá page/OA.
+
+[Cần tra cứu/Unverified] Tương tự H1 — tôi không có quyền truy cập trực tiếp, đã-xác-minh vào
+văn bản chính sách nền tảng mới nhất của Meta (Messenger Platform Policy) hay Zalo (Zalo OA
+Terms/chính sách gửi tin) trong phiên này để trích dẫn chính xác. Điều tôi XÁC NHẬN được từ
+code (không phải chính sách): Zalo OA trong repo hiện là "framework-only — chưa có tài liệu
+chính thức" (CLAUDE.md, và các field trong `_EMPTY_CHANNEL_CFG["zalo_oa"]` đều đánh dấu
+"[Chưa xác minh tên field]" — app/stores.py:50-52) — payload, chữ ký webhook, endpoint gửi
+tin, refresh token đều CHƯA được xác nhận đúng với Zalo thật, nghĩa là kênh Zalo OA hiện KHÔNG
+gửi được tin nhắn thật nào (`main.py` chỉ route rồi no-op theo CLAUDE.md) — nên câu hỏi "có vi
+phạm chính sách Zalo OA không" hiện chưa áp dụng được vì kênh đó chưa hoạt động thật. Với kênh
+Facebook và Zalo cá nhân (`zca-js`) đã hoạt động thật: đề xuất tra trực tiếp tài liệu chính
+sách hiện hành của từng nền tảng trước khi vận hành ở quy mô lớn — đặc biệt lưu ý `zca-js` là
+thư viện dùng giao thức của ứng dụng Zalo cá nhân (không phải API chính thức Zalo cấp cho lập
+trình viên), nên rủi ro khoá tài khoản do vi phạm điều khoản sử dụng của Zalo dành cho người
+dùng cá nhân là điều cần bạn tự đánh giá/tra cứu, tôi không có căn cứ để khẳng định mức độ rủi
+ro cụ thể.
+
+================================================================================
+TỔNG KẾT — NHỮNG GAP LỚN NHẤT CẦN QUYẾT ĐỊNH TRƯỚC (không phải thứ tự bắt buộc, chỉ liệt kê
+theo mức độ tôi thấy có vẻ chặn nhiều thứ khác nhất — [Inference], bạn có thể sắp xếp lại)
+================================================================================
+1. Không có đăng nhập/phân quyền cho admin API — chặn mọi câu hỏi ở mục A3/A4/F2/G1.
+2. Tồn kho không bị trừ khi tạo đơn → race condition đặt trùng hàng cuối (E1/E2).
+3. Chưa quyết định định vị sản phẩm: nơi quản lý đơn cuối cùng hay trung gian đẩy ERP (E8) —
+   ảnh hưởng ngược lên toàn bộ scope của C, E, F.
+4. variant_mode hiện chỉ 1 trục biến thể — chặn mở rộng sang ngành nhiều thuộc tính (F&B
+   combo/topping) như CLAUDE.md đã tự nhận định là rủi ro lớn nhất (B1).
+5. Không có mã giảm giá/khuyến mãi/giá sỉ-lẻ hoạt động thật dù schema đã có chỗ cho giá sỉ
+   (E3/E4).
+6. Chưa có cơ chế bàn giao real-time bot → người thật, chỉ có gắn cờ khiếu nại sau khi đơn đã
+   tạo (D6).
+
+Ghi chú cuối: tài liệu này chỉ trả lời được phần "hiện trạng kỹ thuật" bằng cách đọc code thật
+— các câu hỏi mang tính lựa chọn nghiệp vụ (chữ "[Chưa xác định trong code]") vẫn đang chờ
+quyết định của bạn; tôi cố tình không tự chọn thay để tránh áp đặt hướng sản phẩm bạn chưa
+xác nhận.

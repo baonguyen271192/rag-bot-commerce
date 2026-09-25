@@ -1,14 +1,12 @@
-import { Footprints, ShoppingBag, Soup } from 'lucide-react'
-
-const BUSINESS = {
-  shoe: { label: 'Giày/Dép', icon: Footprints },
-  food: { label: 'Ăn uống', icon: Soup },
-}
+import { bizOf } from '../lib/business'
 
 // Ô "Cửa hàng" (avatar theo ngành + tên + nhãn ngành) — dùng chung cho cả 3 trang
 // kênh tổng hợp, khớp cột "Cửa hàng" trong docs/channels-ia-mockup.html.
+// Icon/nhãn ngành lấy từ lib/business.js (nguồn DUY NHẤT) — trước đây file này tự định
+// nghĩa 1 bản sao riêng chỉ có 2/7 ngành, thêm ngành mới ở business.js sẽ không tự cập
+// nhật ở đây, hiện đủ ngành cho mọi màn hình cùng lúc.
 export default function ChannelStoreCell({ store }) {
-  const biz = BUSINESS[store.business_type] || { label: store.business_type, icon: ShoppingBag }
+  const biz = bizOf(store)
   const Icon = biz.icon
   return (
     <div className="flex items-center gap-3">

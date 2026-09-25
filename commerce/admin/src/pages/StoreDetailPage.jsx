@@ -11,8 +11,10 @@ import {
   ShoppingBasket,
   Sparkles,
   Trash2,
+  Truck,
 } from 'lucide-react'
 import { api } from '../lib/api'
+import { bizOf } from '../lib/business'
 import ConnectionBadge from '../components/ConnectionBadge'
 import ChannelsTab from '../components/ChannelsTab'
 import ErrorBanner from '../components/ErrorBanner'
@@ -51,7 +53,10 @@ export default function StoreDetailPage() {
 
       <div className="mb-7 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-fg">{store.name}</h1>
+          <div className="flex flex-wrap items-center gap-2.5">
+            <h1 className="text-2xl font-semibold tracking-tight text-fg">{store.name}</h1>
+            <BizBadge store={store} />
+          </div>
           <p className="mt-1 text-sm text-fg/45">
             {store.menu_count} món · {store.order_count} đơn đã chốt qua bot
           </p>
@@ -88,6 +93,7 @@ export default function StoreDetailPage() {
 }
 
 function ConfigTab({ store, onSaved }) {
+  const pol = store.policies || {}
   const [form, setForm] = useState({
     name: store.name,
     shop_label: store.shop_label || '',
@@ -98,8 +104,12 @@ function ConfigTab({ store, onSaved }) {
     variant_min: store.variant_min ?? 24,
     variant_max: store.variant_max ?? 46,
     variant_labels: (store.variant_labels || []).join(', '),
+    policy_van_chuyen: pol.van_chuyen || '',
+    policy_thanh_toan: pol.thanh_toan || '',
+    policy_doi_tra: pol.doi_tra || '',
   })
   const [error, setError] = useState('')
+  const [fieldErrors, setFieldErrors] = useState({})
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
 
@@ -108,17 +118,40 @@ function ConfigTab({ store, onSaved }) {
     setForm((f) => ({ ...f, [key]: e.target.value }))
   }
 
+  function validate(variant_mode, variant_min, variant_max, labels) {
+    const errs = {}
+    if (variant_mode === 'nhan' && labels.length === 0) {
+      errs.variant_labels = "Kiểu 'danh sách nhãn tự đặt' cần ít nhất 1 nhãn (vd S, M, L)."
+    }
+    if (variant_mode === 'so' && variant_min > variant_max) {
+      errs.variant_min = 'Số nhỏ nhất phải nhỏ hơn hoặc bằng số lớn nhất.'
+    }
+    return errs
+  }
+
   async function handleSubmit(e) {
     e.preventDefault()
     setError('')
-    setSaving(true)
     setSaved(false)
+    const variant_min = Number(form.variant_min) || 0
+    const variant_max = Number(form.variant_max) || 0
+    const variant_labels = form.variant_labels.split(',').map((s) => s.trim()).filter(Boolean)
+    const errs = validate(form.variant_mode, variant_min, variant_max, variant_labels)
+    setFieldErrors(errs)
+    if (Object.keys(errs).length > 0) return
+    setSaving(true)
     try {
+      const { policy_van_chuyen, policy_thanh_toan, policy_doi_tra, ...rest } = form
       const patch = {
-        ...form,
-        variant_min: Number(form.variant_min) || 0,
-        variant_max: Number(form.variant_max) || 0,
-        variant_labels: form.variant_labels.split(',').map((s) => s.trim()).filter(Boolean),
+        ...rest,
+        variant_min,
+        variant_max,
+        variant_labels,
+        policies: {
+          van_chuyen: policy_van_chuyen,
+          thanh_toan: policy_thanh_toan,
+          doi_tra: policy_doi_tra,
+        },
       }
       await api.updateStore(store.id, patch)
       setSaved(true)
@@ -173,7 +206,7 @@ function ConfigTab({ store, onSaved }) {
             </Field>
             {form.variant_mode === 'so' && (
               <div className="mt-4 grid grid-cols-2 gap-4">
-                <Field label="Số nhỏ nhất">
+                <Field label="Số nhỏ nhất" error={fieldErrors.variant_min}>
                   <input type="number" value={form.variant_min} onChange={set('variant_min')} className="input" />
                 </Field>
                 <Field label="Số lớn nhất">
@@ -183,7 +216,7 @@ function ConfigTab({ store, onSaved }) {
             )}
             {form.variant_mode === 'nhan' && (
               <div className="mt-4">
-                <Field label="Danh sách nhãn" hint="Cách nhau bằng dấu phẩy">
+                <Field label="Danh sách nhãn" hint="Cách nhau bằng dấu phẩy" error={fieldErrors.variant_labels}>
                   <input value={form.variant_labels} onChange={set('variant_labels')} className="input" placeholder="S, M, L, XL" />
                 </Field>
               </div>
@@ -192,20 +225,50 @@ function ConfigTab({ store, onSaved }) {
 
           <div className="border-t border-fg/[0.06] pt-4">
             <div className="mb-3 flex items-center gap-2.5">
+              <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-sky-500/15 text-sky-400">
+                <Truck size={16} />
+              </span>
+              <h3 className="text-sm font-semibold text-fg/80">Chính sách trả lời khách</h3>
+            </div>
+            <p className="mb-3 text-xs text-fg/35">
+              Bot đọc NGUYÊN VĂN 3 câu này khi khách hỏi ship/thanh toán/đổi trả — mặc định lúc tạo
+              lấy theo ngành hàng, có thể sai địa điểm/thời gian cụ thể của cửa hàng bạn, nên sửa lại
+              cho đúng trước khi kết nối kênh thật.
+            </p>
+            <div className="space-y-3">
+              <Field label="Vận chuyển / giao hàng">
+                <textarea value={form.policy_van_chuyen} onChange={set('policy_van_chuyen')}
+                          className="input min-h-[70px] resize-y" />
+              </Field>
+              <Field label="Thanh toán">
+                <textarea value={form.policy_thanh_toan} onChange={set('policy_thanh_toan')}
+                          className="input min-h-[70px] resize-y" />
+              </Field>
+              <Field label="Đổi trả">
+                <textarea value={form.policy_doi_tra} onChange={set('policy_doi_tra')}
+                          className="input min-h-[70px] resize-y" />
+              </Field>
+            </div>
+          </div>
+
+          <div className="border-t border-fg/[0.06] pt-4">
+            <div className="mb-3 flex items-center gap-2.5">
               <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-violet-500/15 text-violet-400">
                 <Sparkles size={16} />
               </span>
-              <h3 className="text-sm font-semibold text-fg/80">Prompt tuỳ chỉnh cho AI</h3>
+              <h3 className="text-sm font-semibold text-fg/80">Prompt tuỳ chỉnh cho AI (nâng cao)</h3>
             </div>
             <textarea
               value={form.custom_prompt}
               onChange={set('custom_prompt')}
               className="input min-h-[110px] resize-y"
-              placeholder="Vd: Luôn gợi ý thêm phụ kiện đi kèm. Xưng 'em', gọi khách 'anh/chị'. Không nói về đối thủ..."
+              placeholder="Vd: Luôn gợi ý thêm phụ kiện đi kèm. Không nói về đối thủ..."
             />
             <p className="mt-1.5 text-xs text-fg/35">
-              Thêm quy tắc riêng cho AI tư vấn của cửa hàng này (tone, cách xưng hô, điều nên/không nên nói).
-              Nối thêm vào rule gốc, không thay hẳn — AI vẫn không bịa sản phẩm/giá ngoài dữ liệu thật.
+              Ngành hàng đã chọn (xem badge ở đầu trang) tự động chỉnh cách AI tư vấn (hỏi size hay hỏi
+              số phần, có gợi ý topping...) và Tone giọng văn ở trên tự chỉnh cách xưng hô — ô này chỉ
+              để thêm quy tắc RIÊNG ngoài 2 cái đó (vd không nói về đối thủ). Nối thêm vào rule gốc,
+              không thay hẳn — AI vẫn không bịa sản phẩm/giá ngoài dữ liệu thật.
             </p>
           </div>
 
@@ -409,12 +472,25 @@ function EmptyState({ icon: Icon, text }) {
   )
 }
 
-function Field({ label, hint, children }) {
+function BizBadge({ store }) {
+  const biz = bizOf(store)
+  const Icon = biz.icon
+  return (
+    <span className="inline-flex items-center gap-1.5 rounded-full bg-fg/[0.06] px-2.5 py-1 text-xs font-medium text-fg/60">
+      <Icon size={12} />
+      {biz.label}
+    </span>
+  )
+}
+
+function Field({ label, hint, error, children }) {
   return (
     <label className="block">
       <span className="mb-1.5 block text-sm font-medium text-fg/80">{label}</span>
       {children}
-      {hint && <span className="mt-1 block text-xs text-fg/40">{hint}</span>}
+      {error
+        ? <span className="mt-1 block text-xs text-rose-500">{error}</span>
+        : hint && <span className="mt-1 block text-xs text-fg/40">{hint}</span>}
     </label>
   )
 }

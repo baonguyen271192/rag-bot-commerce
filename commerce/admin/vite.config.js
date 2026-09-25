@@ -2,8 +2,8 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 
-export default defineConfig({
-  base: '/admin/',
+export default defineConfig(({ command }) => ({
+  base: command === 'build' ? '/admin/' : '/',
   plugins: [react(), tailwindcss()],
   build: {
     outDir: '../static/admin',
@@ -14,4 +14,4 @@ export default defineConfig({
       '/api': 'http://127.0.0.1:8200',
     },
   },
-})
+}))

@@ -45,7 +45,7 @@
 <body>
 <div class="phone">
   <div class="hdr">
-    <div class="av">BQ</div>
+    <div class="av" id="shopAv">?</div>
     <div><div class="name" id="shopName">Shop — Khách lẻ</div><div class="sub">Trợ lý bán hàng đang hoạt động (demo)</div></div>
   </div>
   <div id="chat" class="chat"></div>
@@ -58,10 +58,22 @@
 const SENDER = "sim-" + Math.floor(Math.random()*1e6);
 // Chọn cửa hàng để demo qua URL: /fb?store=shop2 (mặc định 'default').
 const STORE = new URLSearchParams(location.search).get("store") || "default";
+// Chữ tắt avatar tự tính từ TÊN THẬT của cửa hàng, không hardcode "BQ" — trước đây avatar
+// luôn hiện "BQ" bất kể đang xem cửa hàng nào (bug: đổi sang Cháo vẫn hiện BQ). Ưu tiên 1
+// cụm viết hoa liền có sẵn trong tên (vd "Giày BQ" -> "BQ"); không có thì lấy chữ đầu của
+// 2 từ đầu tên (vd "Cháo Nghêu O Hoèn" -> "CN").
+function avatarFor(name){
+  const clean = name.replace(/\(.*?\)/g, "").trim();
+  const caps = clean.match(/\b[A-ZĐ]{2,4}\b/);
+  if (caps) return caps[0];
+  const words = clean.split(/\s+/).filter(Boolean);
+  return ((words[0]||"?")[0] + (words[1]||"")[0]).toUpperCase();
+}
 // Lấy tên cửa hàng thật để hiển thị lên header (đa cửa hàng).
 fetch("/api/stores").then(r=>r.json()).then(list=>{
   const s = (list||[]).find(x=>x.id===STORE);
   if (s) { document.getElementById("shopName").textContent = s.name + " — Khách lẻ";
+           document.getElementById("shopAv").textContent = avatarFor(s.name);
            document.title = s.name + " — Bot"; }
 }).catch(()=>{});
 const chat = document.getElementById("chat");
