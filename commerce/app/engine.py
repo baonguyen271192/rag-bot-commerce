@@ -25,7 +25,6 @@ from __future__ import annotations
 import os
 import re
 import threading
-import time
 import unicodedata
 
 from . import data, store, assistant, stores
@@ -617,11 +616,16 @@ def _do_submit(sess: dict) -> list[dict]:
         # stores.py: "facebook"/"zalo_oa"/"zalo_personal"), không hardcode "facebook"
         # nữa (trước đây MỌI đơn — kể cả qua kênh khác — đều bị ghi nhầm "facebook").
         payment=sess["payment"], channel=sess.get("channel", "facebook"),
-        created_at=time.strftime("%d/%m/%Y %H:%M"),
+        created_at=data.now_vn().strftime("%d/%m/%Y %H:%M"),
         store_id=sess.get("store_id", "default"), has_size=_has_size(sess),
     )
     if shortages:
         return _handle_stock_shortage(sess, shortages)
+    if _has_size(sess):
+        # Đơn vừa trừ tồn kho thẳng qua SQL (repository.create_order_with_stock), KHÔNG đi
+        # qua các hàm mutate của stores.py — phải tự xoá cache ở đây, nếu không bot sẽ tiếp
+        # tục báo tồn kho cũ (chưa trừ) cho khách kế tiếp dù DB đã đúng.
+        stores.invalidate(sess.get("store_id", "default"))
     oid = order["id"]
     pay = sess["payment"]
     sess["my_orders"].append(oid)
@@ -1148,7 +1152,12 @@ def handle(sender_id: str, text: str, store_id: str = "default", channel: str = 
     # dấu vết đang cần chọn thanh toán.
     if state == "PAYMENT":
         s = assistant._strip(text)
-        if any(k in s for k in ("chuyen khoan", "chuyen khoang")) or s.strip() in ("ck", "banking"):
+        # Bug tìm thấy khi test thật: `s.strip() in ("ck", "banking")` chỉ khớp khi CẢ CÂU
+        # đúng bằng "ck", nên "ck nha" (đúng ví dụ nêu trong comment gốc) lại KHÔNG khớp —
+        # đổi sang \b...\b để khớp "ck"/"banking" là 1 TỪ bất kỳ đâu trong câu, không cần
+        # trùng khít cả câu.
+        if (any(k in s for k in ("chuyen khoan", "chuyen khoang"))
+                or re.search(r"\b(ck|banking)\b", s)):
             if not sess["cart"]:
                 return _cart_summary(sess)
             sess["payment"] = "Chuyển khoản"

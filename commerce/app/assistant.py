@@ -11,7 +11,6 @@ from __future__ import annotations
 import os
 import re
 import unicodedata
-from datetime import datetime
 
 from . import business_types, data, stores
 
@@ -466,9 +465,10 @@ _WEEKDAY_VI = ("Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu",
 
 
 def _today_str() -> str:
-    """Ngày giờ THẬT hiện tại (đọc từ đồng hồ server) — đưa vào DATA cho AI, không để
-    AI tự đoán vì LLM không có khái niệm thời gian thực."""
-    now = datetime.now()
+    """Ngày giờ THẬT hiện tại theo giờ Việt Nam (KHÔNG dùng giờ hệ điều hành máy chủ —
+    server thật như Render chạy UTC, lệch 7 tiếng so với giờ VN) — đưa vào DATA cho AI,
+    không để AI tự đoán vì LLM không có khái niệm thời gian thực."""
+    now = data.now_vn()
     return f"{_WEEKDAY_VI[now.weekday()]}, {now.strftime('%d/%m/%Y %H:%M')}"
 
 

@@ -183,6 +183,18 @@ async def health():
     return {"status": "ok"}
 
 
+# ---------------- Trang công khai cho Meta App Review (Privacy Policy / Terms) ----------------
+
+@app.get("/privacy")
+async def privacy():
+    return FileResponse(os.path.join(STATIC_DIR, "privacy.html"))
+
+
+@app.get("/terms")
+async def terms():
+    return FileResponse(os.path.join(STATIC_DIR, "terms.html"))
+
+
 # ==================== Quản lý Bot (console) ====================
 
 router = APIRouter(prefix="/api")
@@ -279,12 +291,20 @@ def admin_store_detail(sid: str):
 class StoreCreate(BaseModel):
     id: str
     name: str
-    business_type: str = "food"     # 'shoe' | 'food'
+    business_type: str = "food"
     has_size: Optional[bool] = None
     variant_mode: Optional[str] = None   # 'so' | 'nhan' | 'khong_co'
-    variant_min: int = 24
-    variant_max: int = 46
-    variant_labels: List[str] = []
+    # Optional (không đặt default cụ thể như 24/46/[]) — CHỦ Ý, để .dict(exclude_unset=True)
+    # bên dưới có thể phân biệt "caller không gửi field" (rơi về mặc định của NGÀNH đã
+    # chọn trong create_store()) với "caller gửi rỗng/0 một cách cố ý". Trước đây các field
+    # này có default cụ thể (24/46/[]) nên Pydantic LUÔN điền sẵn dù client không gửi, khiến
+    # nhánh "dùng mặc định ngành" trong create_store() không bao giờ chạy được — bug tìm
+    # thấy khi tạo store ngành 'fashion' (variant_mode 'nhan') chỉ truyền business_type,
+    # đúng theo thiết kế, vẫn bị báo lỗi "cần ít nhất 1 nhãn" dù registry đã có sẵn nhãn mặc
+    # định S/M/L/XL cho ngành đó.
+    variant_min: Optional[int] = None
+    variant_max: Optional[int] = None
+    variant_labels: Optional[List[str]] = None
     fb_page_id: str = ""
     fb_page_token: str = ""
     tone: str = "warm"
@@ -294,7 +314,7 @@ class StoreCreate(BaseModel):
 @router.post("/admin/stores")
 def admin_create_store(body: StoreCreate):
     try:
-        st = stores.create_store(body.dict())
+        st = stores.create_store(body.dict(exclude_unset=True))
     except ValueError as e:
         raise HTTPException(400, str(e))
     return _store_summary(st)
@@ -396,6 +416,7 @@ class MenuItemBody(BaseModel):
     name: str
     category: str = "Khác"
     price: int
+    color: str = ""
     sizes: Optional[Dict[str, int]] = None
 
 

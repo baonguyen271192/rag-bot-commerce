@@ -85,6 +85,16 @@ def _invalidate(store_id: str) -> None:
     _CACHE.pop(store_id, None)
 
 
+def invalidate(store_id: str) -> None:
+    """Xoá cache 1 store — bản PUBLIC của `_invalidate` để module khác (engine.py) gọi
+    được sau khi mutate dữ liệu store QUA ĐƯỜNG KHÁC (vd repository.create_order_with_stock
+    trừ tồn kho thẳng bằng SQL, không đi qua các hàm mutate của module này) — thiếu bước
+    này khiến bot tiếp tục phục vụ tồn kho CŨ (chưa trừ) cho khách sau, dù DB đã đúng, cho
+    tới khi cache bị xoá vì lý do khác hoặc restart server. Bug tìm thấy khi test thật: đặt
+    1 đơn xong, tồn kho hiện trên API/hội thoại vẫn y như trước khi đặt."""
+    _invalidate(store_id)
+
+
 def _invalidate_all() -> None:
     _CACHE.clear()
 
@@ -260,9 +270,10 @@ def is_builtin(store_id: str) -> bool:
     return bool(row and row.get("builtin"))
 
 
-def _menu_item(code: str, name: str, category: str, price: int, sizes: dict | None = None) -> dict:
+def _menu_item(code: str, name: str, category: str, price: int, sizes: dict | None = None,
+               color: str = "") -> dict:
     return {"code": code.upper(), "name": name, "category": category or "Khác",
-            "retail": int(price), "wholesale": int(price),
+            "retail": int(price), "wholesale": int(price), "color": color,
             "sizes": sizes or {}, "image": "", "images": []}
 
 
@@ -403,7 +414,8 @@ def add_menu_item(store_id: str, item: dict) -> dict:
     if not repository.store_exists(store_id):
         raise ValueError("Cửa hàng không tồn tại")
     sizes = item.get("sizes") or {}
-    mi = _menu_item(item["code"], item["name"], item.get("category", ""), item["price"], sizes)
+    mi = _menu_item(item["code"], item["name"], item.get("category", ""), item["price"], sizes,
+                     item.get("color", ""))
     repository.upsert_product(store_id, mi)
     _invalidate(store_id)
     return mi

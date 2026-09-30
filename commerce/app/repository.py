@@ -19,7 +19,7 @@ import sqlite3
 import threading
 from datetime import datetime, timezone
 
-from . import crypto
+from . import crypto, data
 
 DB_PATH = os.getenv(
     "COMMERCE_DB_PATH", os.path.join(os.path.dirname(__file__), "commerce.db")
@@ -606,7 +606,7 @@ def flag_order(oid: str, note: str) -> dict | None:
     with _conn() as c:
         row = c.execute("SELECT flag_note FROM orders WHERE id = ?", (oid,)).fetchone()
         old = (row["flag_note"] if row else None) or ""
-        stamp = datetime.now(timezone.utc).strftime("%d/%m %H:%M")
+        stamp = data.now_vn().strftime("%d/%m %H:%M")
         entry = f"[{stamp}] {note}".strip()
         merged = f"{old}\n{entry}" if old else entry
         c.execute("UPDATE orders SET flagged = 1, flag_note = ? WHERE id = ?", (merged, oid))

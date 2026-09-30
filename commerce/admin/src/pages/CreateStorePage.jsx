@@ -52,7 +52,12 @@ export default function CreateStorePage() {
       variant_min: t.variant_min,
       variant_max: t.variant_max,
       variant_labels: (t.variant_labels || []).join(', '),
-      unit: f.unit || t.unit,
+      // Luôn ghi đè theo ngành mới chọn (giống mọi field khác ở trên) — trước đây dùng
+      // `f.unit || t.unit` định để "không đè nếu người dùng đã tự sửa tay", nhưng vì ngành
+      // đầu tiên được TỰ ĐỘNG áp lúc mount (unit không còn rỗng từ lần đó), mọi lần đổi
+      // ngành SAU đó không bao giờ cập nhật lại đơn vị nữa — bug tìm thấy khi test thật:
+      // đổi từ "Ăn uống" sang "Thời trang", đơn vị vẫn hiện "phần" thay vì "cái".
+      unit: t.unit,
     }))
   }
 
