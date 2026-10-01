@@ -8,3 +8,4 @@ admin/node_modules/
 static/admin/
 app/commerce.db
 *.db
+.DS_Store
