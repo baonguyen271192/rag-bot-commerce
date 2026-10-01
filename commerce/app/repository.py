@@ -81,6 +81,19 @@ def init_db() -> None:
                 created_at    TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS users (
+                id            TEXT PRIMARY KEY,
+                tenant_id     TEXT,
+                role          TEXT NOT NULL,
+                email         TEXT NOT NULL,
+                password_hash TEXT NOT NULL,
+                status        TEXT NOT NULL DEFAULT 'active',
+                created_at    TEXT NOT NULL,
+                FOREIGN KEY (tenant_id) REFERENCES tenants(id)
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_users_email ON users(email);
+            CREATE INDEX IF NOT EXISTS ix_users_tenant ON users(tenant_id);
+
             CREATE TABLE IF NOT EXISTS stores (
                 id             TEXT PRIMARY KEY,
                 tenant_id      TEXT NOT NULL,
@@ -158,6 +171,13 @@ def init_db() -> None:
             c.execute("ALTER TABLE orders ADD COLUMN flagged INTEGER DEFAULT 0")
         if "flag_note" not in cols:
             c.execute("ALTER TABLE orders ADD COLUMN flag_note TEXT")
+        # Cùng phòng thủ cho `tenants.plan_id` (câu hỏi tự-cấu-hình + gói dịch vụ) — cột
+        # mới thêm vào bảng đã tồn tại, mặc định gói không giới hạn để 3 store demo builtin
+        # (đang dùng chung tenant "tenant-main") không vô tình bị khoá tính năng nào.
+        tenant_cols = {r["name"] for r in c.execute("PRAGMA table_info(tenants)").fetchall()}
+        if "plan_id" not in tenant_cols:
+            c.execute(
+                "ALTER TABLE tenants ADD COLUMN plan_id TEXT NOT NULL DEFAULT 'internal_unlimited'")
 
 
 def now_iso() -> str:
@@ -167,12 +187,13 @@ def now_iso() -> str:
 # ==================== tenants ====================
 
 def create_tenant(id: str, name: str, model_id: str | None = None,
-                   monthly_quota: int | None = None, status: str = "active") -> dict:
+                   monthly_quota: int | None = None, status: str = "active",
+                   plan_id: str = "basic") -> dict:
     with _conn() as c:
         c.execute(
-            "INSERT INTO tenants (id, name, model_id, monthly_quota, status, created_at) "
-            "VALUES (?,?,?,?,?,?)",
-            (id, name, model_id, monthly_quota, status, now_iso()),
+            "INSERT INTO tenants (id, name, model_id, monthly_quota, status, plan_id, created_at) "
+            "VALUES (?,?,?,?,?,?,?)",
+            (id, name, model_id, monthly_quota, status, plan_id, now_iso()),
         )
     return get_tenant(id)
 
@@ -187,6 +208,53 @@ def list_tenants() -> list[dict]:
     with _conn() as c:
         rows = c.execute("SELECT * FROM tenants ORDER BY rowid").fetchall()
     return [dict(r) for r in rows]
+
+
+def update_tenant_plan(tenant_id: str, plan_id: str) -> None:
+    with _conn() as c:
+        c.execute("UPDATE tenants SET plan_id=? WHERE id=?", (plan_id, tenant_id))
+
+
+# ==================== users (đăng nhập tự-cấu-hình cho chủ shop) ====================
+
+def create_user(id: str, tenant_id: str | None, role: str, email: str,
+                 password_hash: str, status: str = "active") -> dict:
+    with _conn() as c:
+        c.execute(
+            "INSERT INTO users (id, tenant_id, role, email, password_hash, status, created_at) "
+            "VALUES (?,?,?,?,?,?,?)",
+            (id, tenant_id, role, email.lower(), password_hash, status, now_iso()),
+        )
+    return get_user(id)
+
+
+def get_user(user_id: str) -> dict | None:
+    with _conn() as c:
+        row = c.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def get_user_by_email(email: str) -> dict | None:
+    with _conn() as c:
+        row = c.execute("SELECT * FROM users WHERE email=?", (email.lower(),)).fetchone()
+    return dict(row) if row else None
+
+
+def get_tenant_owner(tenant_id: str) -> dict | None:
+    """1 tenant_owner/tenant trong thiết kế v1 (provision_tenant_store tạo đúng 1 user
+    lúc cấp store) — ORDER BY created_at lấy người tạo sớm nhất nếu sau này có >1."""
+    with _conn() as c:
+        row = c.execute(
+            "SELECT * FROM users WHERE tenant_id=? AND role='tenant_owner' "
+            "ORDER BY created_at LIMIT 1",
+            (tenant_id,),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def update_user_password(user_id: str, password_hash: str) -> None:
+    with _conn() as c:
+        c.execute("UPDATE users SET password_hash=? WHERE id=?", (password_hash, user_id))
 
 
 # ==================== stores ====================

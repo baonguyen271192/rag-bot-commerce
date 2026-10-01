@@ -1,15 +1,24 @@
 import { Link } from 'react-router-dom'
-import { ArrowRight, CheckCircle2 } from 'lucide-react'
+import { ArrowRight, CheckCircle2, ShoppingBag, Store, TriangleAlert } from 'lucide-react'
 import { useStoreOverview } from '../hooks/useStoreOverview'
-import AttentionCard from '../components/AttentionCard'
+import StatCard from '../components/StatCard'
+import StoreTable from '../components/StoreTable'
+import ChannelHealthStrip from '../components/ChannelHealthStrip'
 import ErrorBanner from '../components/ErrorBanner'
 
 export default function OverviewPage() {
   const { stores, error, load, totalOrders, attention, healthy } = useStoreOverview()
 
+  // Cửa hàng nhiều đơn nhất — cho KPI "Đơn qua bot" 1 câu ngữ cảnh thực tế thay vì chỉ
+  // 1 con số trần trụi (feedback đã lưu: KPI card cần sub-line từ dữ liệu thật, vd
+  // "Nhiều nhất: X (5)"), không bịa thêm field nào, chỉ rút ra từ danh sách đã có.
+  const busiest = stores?.length
+    ? stores.reduce((a, b) => (b.order_count > a.order_count ? b : a))
+    : null
+
   return (
     <div>
-      <div className="mb-2">
+      <div className="mb-6">
         <h1 className="text-2xl font-semibold tracking-tight text-fg">Tổng quan</h1>
         <p className="mt-1 text-sm text-fg/55">Sức khoẻ bot đặt đơn của tất cả cửa hàng.</p>
       </div>
@@ -23,14 +32,33 @@ export default function OverviewPage() {
       )}
 
       {stores && (
-        <div className="card mb-7 flex divide-x divide-line overflow-hidden">
-          <KpiStub value={stores.length} label="cửa hàng" />
-          {attention.length > 0 && (
-            <KpiStub value={attention.length} label="cần xử lý" className="text-amber-600 dark:text-amber-400" />
-          )}
-          <KpiStub value={totalOrders} label="đơn qua bot" />
+        <div className="mb-5 grid gap-4 sm:grid-cols-3">
+          <StatCard
+            icon={Store}
+            label="Cửa hàng"
+            value={stores.length}
+            sub={healthy.length > 0 ? `${healthy.length} đang hoạt động tốt` : 'chưa có cửa hàng nào ổn định'}
+            tone="info"
+          />
+          <StatCard
+            icon={TriangleAlert}
+            label="Cần xử lý"
+            value={attention.length}
+            sub={attention.length > 0 ? 'chưa nhận được tin nhắn khách' : 'tất cả cửa hàng đều ổn'}
+            tone={attention.length > 0 ? 'warning' : 'muted'}
+            highlight={attention.length > 0}
+          />
+          <StatCard
+            icon={ShoppingBag}
+            label="Đơn qua bot"
+            value={totalOrders}
+            sub={busiest && busiest.order_count > 0 ? `Nhiều nhất: ${busiest.name} (${busiest.order_count})` : 'chưa có đơn nào'}
+            tone="accent"
+          />
         </div>
       )}
+
+      {stores && stores.length > 0 && <ChannelHealthStrip stores={stores} />}
 
       {!stores ? (
         !error && <p className="text-fg/50">Đang tải…</p>
@@ -43,14 +71,16 @@ export default function OverviewPage() {
           </Link>
         </p>
       ) : attention.length > 0 ? (
-        <section>
-          <h2 className="mb-3 text-sm font-semibold text-fg">Cần xử lý ({attention.length})</h2>
-          <div className="space-y-3">
-            {attention.map(({ store: s, info }) => (
-              <AttentionCard key={s.id} store={s} info={info} />
-            ))}
+        <div className="card overflow-hidden">
+          <div className="flex items-center justify-between border-b border-line px-5 py-3.5">
+            <h3 className="text-sm font-semibold text-fg">Cần xử lý ({attention.length})</h3>
+            <Link to="/stores" className="inline-flex items-center gap-1.5 text-xs font-medium text-indigo-500 hover:underline">
+              Xem tất cả cửa hàng
+              <ArrowRight size={13} />
+            </Link>
           </div>
-        </section>
+          <StoreTable stores={attention.map((a) => a.store)} />
+        </div>
       ) : (
         <div className="card flex items-center gap-3.5 p-5">
           <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
@@ -59,31 +89,6 @@ export default function OverviewPage() {
           <p className="text-sm text-fg2">Tất cả {healthy.length} cửa hàng đều đang hoạt động tốt.</p>
         </div>
       )}
-
-      {stores && stores.length > 0 && (
-        <div className="mt-8 flex items-center gap-3 text-sm">
-          {attention.length > 0 && healthy.length > 0 && (
-            <span className="text-fg/55">
-              {healthy.length} cửa hàng khác đang hoạt động tốt.
-            </span>
-          )}
-          <Link to="/stores" className="inline-flex items-center gap-1.5 font-medium text-indigo-500 hover:underline">
-            Xem tất cả cửa hàng
-            <ArrowRight size={15} />
-          </Link>
-        </div>
-      )}
-    </div>
-  )
-}
-
-// Dải số liệu kiểu "cuống vé" — số lớn + nhãn nhỏ, ngăn bằng gạch dọc thay vì dấu "·"
-// giữa các con số trong 1 câu văn.
-function KpiStub({ value, label, className }) {
-  return (
-    <div className="flex-1 px-5 py-4">
-      <div className={'text-2xl font-semibold tabular-nums tracking-tight ' + (className || 'text-fg')}>{value}</div>
-      <div className="mt-0.5 text-xs text-fg/55">{label}</div>
     </div>
   )
 }

@@ -57,15 +57,15 @@ export default function ZaloOaChannelPage() {
           label="OA đã kết nối"
           value={connected.length}
           sub="chờ tài liệu API"
-          accent="bg-amber-500/15 text-amber-400"
+          tone="warning"
         />
-        <StatCard icon={MessageCircle} label="Đơn qua OA" value="—" sub="chưa khả dụng" accent="bg-indigo-500/15 text-indigo-400" />
+        <StatCard icon={MessageCircle} label="Đơn qua OA" value="—" sub="chưa khả dụng" tone="muted" />
         <StatCard
           icon={Layers}
           label="Trường cấu hình"
           value={4}
           sub="OA ID · App Secret · Access/Refresh token"
-          accent="bg-violet-500/15 text-violet-400"
+          tone="accent"
         />
       </div>
 

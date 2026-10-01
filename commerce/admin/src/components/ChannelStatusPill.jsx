@@ -3,6 +3,9 @@
 const TONE = {
   on: { cls: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400', dot: 'bg-emerald-500 dark:bg-emerald-400' },
   off: { cls: 'bg-amber-500/10 text-amber-700 dark:text-amber-400', dot: 'bg-amber-500 dark:bg-amber-400' },
+  // 'critical' — nghiêm trọng hơn 'off' (vd cửa hàng ĐÃ TỪNG có đơn, giờ mất hết kênh
+  // sống — đang mất đơn thật mỗi ngày, không chỉ "chưa lên sóng").
+  critical: { cls: 'bg-rose-500/10 text-rose-700 dark:text-rose-400', dot: 'bg-rose-500 dark:bg-rose-400' },
   muted: { cls: 'bg-fg/[0.06] text-fg3', dot: 'bg-fg3' },
 }
 

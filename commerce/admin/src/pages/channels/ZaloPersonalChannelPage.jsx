@@ -75,21 +75,22 @@ export default function ZaloPersonalChannelPage() {
           label="Phiên đang chạy"
           value={running.length}
           sub={`${enabledRows.length} cửa hàng đã bật kênh`}
-          accent="bg-sky-500/15 text-sky-400"
+          tone="sky"
         />
         <StatCard
           icon={RefreshCw}
           label="Đơn qua Zalo cá nhân"
           value={ordersOfRunning}
           sub="Tổng đơn của cửa hàng có phiên chạy — chưa lọc riêng theo kênh"
-          accent="bg-violet-500/15 text-violet-400"
+          tone="accent"
         />
         <StatCard
           icon={ShieldAlert}
           label="Cần đăng nhập lại"
           value={needsRelogin}
           sub="đã bật kênh nhưng chưa/hết phiên"
-          accent="bg-amber-500/15 text-amber-400"
+          tone="warning"
+          highlight={needsRelogin > 0}
         />
       </div>
 

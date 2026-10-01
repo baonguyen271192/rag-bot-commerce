@@ -1,27 +1,43 @@
+import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Plus } from 'lucide-react'
+import { Plus, Search } from 'lucide-react'
 import { useStoreOverview } from '../hooks/useStoreOverview'
-import AttentionCard from '../components/AttentionCard'
-import StoreRow from '../components/StoreRow'
+import { useAuth } from '../lib/auth'
+import StoreTable from '../components/StoreTable'
 import ErrorBanner from '../components/ErrorBanner'
 
 export default function StoreListPage() {
-  const { stores, error, load, attention, healthy } = useStoreOverview()
+  const { stores, error, load, attention } = useStoreOverview()
+  const { user } = useAuth()
+  const [query, setQuery] = useState('')
+
+  const filtered = useMemo(() => {
+    if (!stores) return null
+    const q = query.trim().toLowerCase()
+    if (!q) return stores
+    return stores.filter((s) => s.name.toLowerCase().includes(q))
+  }, [stores, query])
 
   return (
     <div>
-      <div className="mb-2 flex flex-wrap items-start justify-between gap-4">
+      <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight text-fg">Cửa hàng</h1>
-          <p className="mt-1 text-sm text-fg/55">Quản lý bot đặt đơn cho tất cả cửa hàng.</p>
+          <p className="mt-1 text-sm text-fg/55">
+            {user?.role === 'super_admin'
+              ? 'Quản lý bot đặt đơn cho tất cả cửa hàng.'
+              : 'Quản lý bot đặt đơn cho cửa hàng của bạn.'}
+          </p>
         </div>
-        <Link
-          to="/stores/new"
-          className="btn-primary flex items-center gap-2 px-4 py-2.5 text-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-400"
-        >
-          <Plus size={16} />
-          Tạo cửa hàng
-        </Link>
+        {user?.role === 'super_admin' && (
+          <Link
+            to="/stores/new"
+            className="btn-primary flex items-center gap-2 px-4 py-2.5 text-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-400"
+          >
+            <Plus size={16} />
+            Tạo cửa hàng
+          </Link>
+        )}
       </div>
 
       <ErrorBanner message={error} />
@@ -32,37 +48,26 @@ export default function StoreListPage() {
         </button>
       )}
 
-      {stores && <p className="mb-7 text-sm text-fg2">{stores.length} cửa hàng</p>}
-
       {!stores ? (
         !error && <p className="text-fg/50">Đang tải…</p>
-      ) : stores.length === 0 ? (
-        <p className="text-fg/50">Chưa có cửa hàng nào.</p>
       ) : (
-        <div className="space-y-8">
-          {attention.length > 0 && (
-            <section>
-              <h2 className="mb-3 text-sm font-semibold text-fg">Cần xử lý ({attention.length})</h2>
-              <div className="space-y-3">
-                {attention.map(({ store: s, info }) => (
-                  <AttentionCard key={s.id} store={s} info={info} />
-                ))}
-              </div>
-            </section>
-          )}
-
-          {healthy.length > 0 && (
-            <section>
-              <h2 className="mb-3 text-sm font-semibold text-fg">
-                {attention.length > 0 ? `Đang hoạt động tốt (${healthy.length})` : 'Tất cả cửa hàng'}
-              </h2>
-              <div className="card overflow-hidden">
-                {healthy.map((s, i) => (
-                  <StoreRow key={s.id} store={s} bordered={i > 0} />
-                ))}
-              </div>
-            </section>
-          )}
+        <div className="card overflow-hidden">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-5 py-3.5">
+            <h3 className="text-sm font-semibold text-fg">
+              {stores.length} cửa hàng
+              {attention.length > 0 && <span className="ml-2 font-normal text-amber-600 dark:text-amber-400">· {attention.length} cần xử lý</span>}
+            </h3>
+            <label className="relative">
+              <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-fg/35" />
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Tìm cửa hàng theo tên…"
+                className="input w-56 py-1.5 pl-8 text-sm"
+              />
+            </label>
+          </div>
+          <StoreTable stores={filtered} />
         </div>
       )}
     </div>

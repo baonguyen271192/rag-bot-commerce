@@ -20,7 +20,7 @@ from dotenv import load_dotenv
 load_dotenv()  # CREDENTIALS_KEY (đọc bởi crypto.py qua repository.py) sống ở .env,
                 # giống cách main.py load_dotenv() trước khi import các module đụng DB.
 
-from .. import repository
+from .. import auth, repository
 from ..catalog import PRODUCTS
 from ..stores import _CHAO_POLICIES, _DEFAULT_RETAIL_POLICIES
 
@@ -64,15 +64,6 @@ _BUILTINS = [
         "fb_page_id_env": "FB_PAGE_ID_DEFAULT", "fb_page_token_env": "PAGE_ACCESS_TOKEN_DEFAULT",
     },
     {
-        "id": "shop2", "name": "Giày Nam Phong Cách", "shop_label": "Shop Giày Nam Phong Cách",
-        "business_type": "shoe", "unit": "đôi", "has_size": True,
-        "variant_mode": "so", "variant_min": 24, "variant_max": 46, "tone": "warm",
-        "policies": _DEFAULT_RETAIL_POLICIES,
-        # Catalog demo thứ 2 = CHỈ giày nam (khớp bản cũ, để nhìn rõ khác biệt khi demo).
-        "products": [p for p in PRODUCTS.values() if p["category"] == "Giày Nam"],
-        "fb_page_id_env": "FB_PAGE_ID_SHOP2", "fb_page_token_env": "PAGE_ACCESS_TOKEN_SHOP2",
-    },
-    {
         "id": "chao", "name": "Cháo Nghêu O Hoèn", "shop_label": "Cháo Nghêu O Hoèn",
         "business_type": "food", "unit": "phần", "has_size": False,
         "variant_mode": "khong_co", "variant_min": None, "variant_max": None, "tone": "warm",
@@ -85,7 +76,9 @@ _BUILTINS = [
 
 def _seed_stores() -> None:
     if not repository.get_tenant(_TENANT_ID):
-        repository.create_tenant(_TENANT_ID, "Tenant chính (demo)")
+        # internal_unlimited — 3 cửa hàng demo builtin không thuộc khách hàng trả phí
+        # nào, không nên bị chặn tính năng nào bởi hệ thống gói mới.
+        repository.create_tenant(_TENANT_ID, "Tenant chính (demo)", plan_id="internal_unlimited")
     for cfg in _BUILTINS:
         sid = cfg["id"]
         if repository.store_exists(sid):
@@ -146,12 +139,34 @@ def _migrate_old_orders() -> None:
     print(f"  - đã copy {n} đơn từ orders.db cũ (bỏ qua nếu id đã tồn tại)")
 
 
+def _seed_super_admin() -> None:
+    """Tài khoản super_admin đầu tiên — không có luồng đăng ký công khai cho role này
+    (chỉ super_admin mới tạo được tenant khác qua provision_tenant_store), nên phải seed
+    thủ công từ env lúc migrate. Idempotent: bỏ qua nếu email đã tồn tại, và bỏ qua êm
+    (không lỗi) nếu chưa đặt env — cho phép chạy migrate ở môi trường chưa cần đăng nhập."""
+    email = os.getenv("SUPER_ADMIN_EMAIL", "").strip().lower()
+    password = os.getenv("SUPER_ADMIN_PASSWORD", "")
+    if not email or not password:
+        print("  - thiếu SUPER_ADMIN_EMAIL/SUPER_ADMIN_PASSWORD, bỏ qua seed super admin")
+        return
+    if repository.get_user_by_email(email):
+        print(f"  - {email}: tài khoản super admin đã tồn tại, bỏ qua")
+        return
+    repository.create_user(
+        id=auth.new_id("user"), tenant_id=None, role="super_admin",
+        email=email, password_hash=auth.hash_password(password),
+    )
+    print(f"  - đã tạo super admin: {email}")
+
+
 def main() -> None:
     repository.init_db()
     print("Seed cửa hàng builtin...")
     _seed_stores()
     print("Copy lịch sử đơn hàng cũ...")
     _migrate_old_orders()
+    print("Seed tài khoản super admin...")
+    _seed_super_admin()
     print("Xong.")
 
 

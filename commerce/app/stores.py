@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import re
 
-from . import business_types, repository
+from . import auth, business_types, plans, repository
 
 # Giữ 2 hằng số này cho `_seed_stores()` (migrate_to_db.py — ghi thẳng qua repository,
 # KHÔNG qua create_store() bên dưới nên không đụng registry business_types) — không phải
@@ -244,6 +244,23 @@ def zalo_enabled(store_id: str | None) -> bool:
     return bool((channel_config(store_id, "zalo_personal") or {}).get("enabled", False))
 
 
+def plan_of(store_id: str | None) -> str:
+    """`plan_id` của TENANT sở hữu store — gom logic `get_store_row→get_tenant→plan_id`
+    đang lặp lại ở `main.py` (`_store_summary`/`auth.require_feature`) về 1 chỗ. Fail-safe:
+    store không tồn tại / không có tenant / tenant không có row → `plans.DEFAULT_PLAN`
+    (fail-closed — coi như gói thấp nhất, KHÔNG suy ra "không giới hạn")."""
+    row = repository.get_store_row(store_id) if store_id else None
+    tenant = repository.get_tenant(row["tenant_id"]) if row else None
+    return (tenant or {}).get("plan_id", plans.DEFAULT_PLAN)
+
+
+def channel_allowed_by_plan(store_id: str | None, channel_type: str) -> bool:
+    """Gói hiện tại của tenant sở hữu store có cho phép dùng `channel_type` không —
+    dùng ở runtime (vd gate `POST /channels/zalo/message`) chứ không chỉ lúc BẬT kênh
+    qua admin API (xem `auth.require_feature`, chỉ chạy lúc đổi cấu hình)."""
+    return plans.has_feature(plan_of(store_id), channel_type)
+
+
 def all_stores() -> list[dict]:
     return [get(row["id"]) for row in repository.list_store_rows()]
 
@@ -330,7 +347,11 @@ def create_store(cfg: dict) -> dict:
     _validate_variant_config(variant_mode, variant_min, variant_max, variant_labels)
     has_size = bool(cfg.get("has_size", variant_mode != "khong_co"))
     row = {
-        "id": sid, "tenant_id": _TENANT_ID, "name": cfg.get("name", sid),
+        # tenant_id lấy từ cfg nếu có (self-service portal — mỗi tenant thật sự tách
+        # biệt, xem provision_tenant_store() bên dưới), mặc định _TENANT_ID để KHÔNG đổi
+        # hành vi cũ (script seed builtin/mọi lời gọi create_store() trước đây không
+        # truyền tenant_id vẫn ra đúng "tenant-main" như trước).
+        "id": sid, "tenant_id": cfg.get("tenant_id") or _TENANT_ID, "name": cfg.get("name", sid),
         "shop_label": cfg.get("shop_label") or cfg.get("name", sid),
         "business_type": biz_key,
         "unit": cfg.get("unit") or biz.get("unit", "cái"),
@@ -356,6 +377,36 @@ def create_store(cfg: dict) -> dict:
         })
     _invalidate(sid)
     return get(sid)
+
+
+def provision_tenant_store(cfg: dict) -> dict:
+    """Luồng DUY NHẤT tạo store MỚI (không phải builtin) kể từ khi có self-service portal
+    thật: tạo 1 tenant mới + store đầu tiên của tenant đó + 1 tài khoản tenant_owner đăng
+    nhập được — atomically-enough cho v1 (không có transaction xuyên 3 bảng; chấp nhận
+    được ở quy mô hiện tại, xem ghi chú rủi ro trong kế hoạch). Trước đây mọi store tạo
+    qua admin đều bị gán cứng vào 1 tenant dùng chung ("tenant-main"), không có khái niệm
+    khách hàng thật sở hữu riêng store của họ."""
+    sid = (cfg.get("id") or "").strip().lower()
+    if not sid or repository.store_exists(sid):
+        raise ValueError("Mã cửa hàng trống hoặc đã tồn tại")
+    owner_email = (cfg.get("owner_email") or "").strip().lower()
+    if not owner_email:
+        raise ValueError("Cần email chủ cửa hàng để tạo tài khoản đăng nhập")
+    if repository.get_user_by_email(owner_email):
+        raise ValueError(f"Email '{owner_email}' đã có tài khoản")
+    owner_password = cfg.get("owner_password") or ""
+    if len(owner_password) < 6:
+        raise ValueError("Mật khẩu chủ cửa hàng cần ít nhất 6 ký tự")
+    tenant_id = f"tenant-{sid}"
+    plan_id = cfg.get("plan_id") or plans.DEFAULT_PLAN
+    repository.create_tenant(tenant_id, cfg.get("tenant_name") or cfg.get("name", sid),
+                              plan_id=plan_id)
+    st = create_store({**cfg, "tenant_id": tenant_id})
+    repository.create_user(
+        id=auth.new_id("user"), tenant_id=tenant_id, role="tenant_owner",
+        email=owner_email, password_hash=auth.hash_password(owner_password),
+    )
+    return st
 
 
 _EDITABLE = ("name", "shop_label", "business_type", "unit", "has_size",
@@ -400,6 +451,45 @@ def update_store(store_id: str, patch: dict) -> dict:
         repository.update_store_row(
             store_id, {"policies_json": {**cur_policies, **provided["policies"]}})
     _invalidate(store_id)
+    return get(store_id)
+
+
+def set_plan(store_id: str, plan_id: str) -> dict:
+    """Đổi gói dịch vụ — đổi ở cấp TENANT (bảng `tenants`), không phải cấp store, nên ẢNH
+    HƯỞNG MỌI store thuộc cùng tenant (v1 mỗi tenant có đúng 1 store, nhưng schema không
+    cấm nhiều hơn). Validate `plan_id` nằm trong whitelist `plans.PLANS` (không nhận chuỗi
+    tự do). Cấm đổi gói cho store builtin (tenant-main dùng chung giữa 3 demo) — nếu cho
+    phép, 1 lần đổi gói sẽ vô tình khoá/mở tính năng của CẢ 3 demo cùng lúc.
+
+    Q3 (đã chốt): nếu gói MỚI không còn bao gồm 1 loại kênh đang `enabled=true` ở BẤT KỲ
+    store nào của tenant, tự động set `channels.<ctype>.enabled=false` cho store đó (kèm
+    invalidate cache) — không chỉ dựa vào gate runtime P0-2 chặn xử lý tin nhắn, mà còn
+    tắt hẳn cờ để admin UI không tiếp tục hiện kênh "đang bật" sai sự thật."""
+    if plan_id not in plans.PLANS:
+        raise ValueError(f"Gói dịch vụ không hợp lệ: {plan_id}")
+    if not repository.store_exists(store_id):
+        raise ValueError("Cửa hàng không tồn tại")
+    if is_builtin(store_id):
+        raise ValueError("Cửa hàng demo dựng sẵn dùng chung gói nội bộ — không đổi gói riêng được")
+    row = repository.get_store_row(store_id)
+    tenant_id = row["tenant_id"]
+    repository.update_tenant_plan(tenant_id, plan_id)
+    new_features = plans.get(plan_id).get("features", set())
+    for st in all_stores():
+        if st.get("tenant_id") != tenant_id:
+            continue
+        sid = st["id"]
+        changed = False
+        for ctype in CHANNEL_TYPES:
+            cfg = (st.get("channels") or {}).get(ctype) or {}
+            if ctype not in new_features and cfg.get("enabled"):
+                # upsert_channel() TỰ merge với cấu hình hiện có đọc lại từ DB (xem
+                # repository.upsert_channel) — chỉ cần gửi field cần đổi, không phải gửi
+                # nguyên cfg (tránh ghi đè nhầm bằng dữ liệu cache có thể đã cũ).
+                repository.upsert_channel(sid, ctype, {"enabled": False})
+                changed = True
+        if changed:
+            _invalidate(sid)
     return get(store_id)
 
 

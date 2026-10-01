@@ -46,21 +46,23 @@ export default function FacebookChannelPage() {
           label="Đã kết nối"
           value={connected.length}
           sub={`trên ${rows.length} cửa hàng`}
-          accent="bg-emerald-500/15 text-emerald-400"
+          tone="success"
+          highlight={connected.length === rows.length && rows.length > 0}
         />
         <StatCard
           icon={TriangleAlert}
           label="Chưa kết nối"
           value={notConnected}
           sub="cần điền Page ID / token"
-          accent="bg-amber-500/15 text-amber-400"
+          tone="warning"
+          highlight={notConnected > 0}
         />
         <StatCard
           icon={Send}
           label="Tổng đơn (cửa hàng đang bật kênh)"
           value={ordersOfConnected}
           sub="Chưa lọc riêng theo kênh — xem ghi chú dưới bảng"
-          accent="bg-violet-500/15 text-violet-400"
+          tone="accent"
         />
       </div>
 

@@ -1,6 +1,8 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   AlertTriangle,
+  ArrowRight,
   Eye,
   EyeOff,
   Info,
@@ -11,6 +13,7 @@ import {
   Smartphone,
 } from 'lucide-react'
 import { api } from '../lib/api'
+import { useAuth } from '../lib/auth'
 import ErrorBanner from './ErrorBanner'
 
 // Trang cấu hình kênh cho 1 cửa hàng. Mỗi loại kênh là 1 thẻ độc lập, tự giữ form
@@ -19,7 +22,10 @@ import ErrorBanner from './ErrorBanner'
 export default function ChannelsTab({ store, onChanged }) {
   const ch = store.channels || {}
   return (
-    <div className="space-y-5">
+    // max-w-[1100px] — như tab Cấu hình: khung ngoài (AppShell) rộng 1600px để bảng dữ
+    // liệu dùng hết chỗ, nhưng thẻ bật/tắt kênh chỉ có vài input ngắn (Page ID, token)
+    // nên cần tự giới hạn, không thì input/nút "Lưu" kéo giãn hết cỡ, rất xấu.
+    <div className="max-w-[1100px] mx-auto space-y-5">
       <FacebookChannel store={store} data={ch.facebook || {}} onChanged={onChanged} />
       <ZaloPersonalChannel store={store} data={ch.zalo_personal || {}} onChanged={onChanged} />
       <ZaloOaChannel store={store} data={ch.zalo_oa || {}} onChanged={onChanged} />
@@ -79,6 +85,55 @@ function FacebookChannel({ store, data, onChanged }) {
 // ── Zalo cá nhân (qua sidecar zalo-bridge) ────────────────────────────────────
 function ZaloPersonalChannel({ store, data, onChanged }) {
   const save = useChannelSave(store.id, 'zalo_personal', onChanged)
+  const { user } = useAuth()
+  const navigate = useNavigate()
+  // plan_features rỗng (store cũ chưa qua tenant provisioning, hoặc field thiếu) coi
+  // như CHƯA có — chỉ mở khoá khi backend xác nhận rõ ràng gói hiện tại bao gồm kênh
+  // này (backend vẫn là nơi chặn thật qua require_feature(), đây chỉ là UX gợi ý sớm).
+  const locked = !(store.plan_features || []).includes('zalo_personal')
+
+  if (locked) {
+    // Hành động thật (P1-2, phụ thuộc P0-3 + Q5) thay cho text chết cũ:
+    //   - super_admin (Q4: người DUY NHẤT đổi được gói) -> nút điều hướng thẳng tới khối
+    //     đổi gói ở tab Cấu hình (đổi query param tab=config), không gọi API ở đây.
+    //   - tenant_owner -> không tự đổi được, hiện hướng dẫn TĨNH (Q5-b: chưa có email hỗ
+    //     trợ thật, không phải link/mailto bấm được).
+    return (
+      <div className="card p-6 opacity-90">
+        <div className="flex items-start gap-3">
+          <span className={'flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ' + COLORS.sky}>
+            <Smartphone size={18} />
+          </span>
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="text-sm font-semibold text-fg">Zalo cá nhân</h3>
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] font-medium text-amber-700 dark:text-amber-300">
+                <Lock size={11} />
+                Gói {store.plan_label} chưa bao gồm
+              </span>
+            </div>
+            <p className="mt-0.5 text-xs text-fg/45">Dùng tài khoản Zalo cá nhân qua bridge riêng</p>
+            <p className="mt-3 text-sm text-fg/60">
+              Kênh này chỉ dùng được ở gói <strong>Pro</strong> trở lên.
+            </p>
+            {user?.role === 'super_admin' ? (
+              <button
+                type="button"
+                onClick={() => navigate(`/stores/${store.id}?tab=config`)}
+                className="btn-primary mt-3 inline-flex items-center gap-1.5 px-3.5 py-2 text-xs"
+              >
+                Đổi gói cho cửa hàng này
+                <ArrowRight size={13} />
+              </button>
+            ) : (
+              <p className="mt-2 text-sm font-medium text-fg/70">Liên hệ quản trị viên để nâng cấp gói.</p>
+            )}
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <ChannelCard
       icon={Smartphone}

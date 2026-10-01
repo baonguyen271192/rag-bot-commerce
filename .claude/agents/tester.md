@@ -17,6 +17,7 @@ Quy trình:
    - Đường chạy thuận lợi.
    - Từng trường hợp biên mà kế hoạch đã nêu tên.
    - Ít nhất một trường hợp đầu vào sai và phải thất bại đúng cách.
+   Test phải nằm trong FILE THẬT của repo, không chạy assert inline rồi bỏ.
 5. Chạy test. Ghi kết quả vào `.bangiao/ket-qua-test.md`:
    - Lệnh bạn đã chạy.
    - Số test pass / fail.

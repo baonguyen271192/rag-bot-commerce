@@ -5,6 +5,9 @@ argument-hint: [mo ta tinh nang]
 
 Chạy trọn dây chuyền làm tính năng cho: $ARGUMENTS
 
+Dùng đúng các subagent định nghĩa trong .claude/agents/ (planner, coder, tester,
+reviewer). KHÔNG dùng subagent "Plan" hay "Explore" có sẵn của Claude Code.
+
 Làm lần lượt, không nhảy cóc. Sau mỗi chặng, kiểm tra file bàn giao đã tồn tại và
 đọc qua nó, rồi mới sang chặng kế tiếp.
 
@@ -19,6 +22,7 @@ Làm lần lượt, không nhảy cóc. Sau mỗi chặng, kiểm tra file bàn 
 **Chặng 1 — Planner**
 - Giao việc cho subagent `planner` kèm nguyên văn yêu cầu ở trên.
 - Chờ tới khi `.bangiao/ke-hoach.md` tồn tại, rồi đọc nó.
+- Nếu file không được tạo ra, DỪNG LẠI và báo tôi biết. Không tự lập kế hoạch thay.
 
 **Chặng 2 — Coder**
 - Nếu kế hoạch có mục CÂU HỎI CÒN BỎ NGỎ: DỪNG LẠI, đưa các câu hỏi đó cho tôi.

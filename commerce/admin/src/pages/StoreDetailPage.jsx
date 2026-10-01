@@ -3,7 +3,11 @@ import { Link, useParams, useSearchParams } from 'react-router-dom'
 import {
   AlertTriangle,
   ArrowLeft,
+  Box,
   ClipboardList,
+  Eye,
+  EyeOff,
+  KeyRound,
   Layers,
   Lock,
   Radio,
@@ -12,9 +16,12 @@ import {
   Sparkles,
   Trash2,
   Truck,
+  UserRound,
 } from 'lucide-react'
 import { api } from '../lib/api'
 import { bizOf } from '../lib/business'
+import { CHANNEL_LABELS } from '../lib/channels'
+import { useAuth } from '../lib/auth'
 import ConnectionBadge from '../components/ConnectionBadge'
 import ChannelsTab from '../components/ChannelsTab'
 import ErrorBanner from '../components/ErrorBanner'
@@ -56,6 +63,7 @@ export default function StoreDetailPage() {
           <div className="flex flex-wrap items-center gap-2.5">
             <h1 className="text-2xl font-semibold tracking-tight text-fg">{store.name}</h1>
             <BizBadge store={store} />
+            <PlanBadge store={store} />
           </div>
           <p className="mt-1 text-sm text-fg/45">
             {store.menu_count} món · {store.order_count} đơn đã chốt qua bot
@@ -164,7 +172,10 @@ function ConfigTab({ store, onSaved }) {
   }
 
   return (
-    <form onSubmit={handleSubmit}>
+    <div className="max-w-[1100px] mx-auto">
+      <OwnerAccountCard store={store} />
+      <PlanCard store={store} onChanged={onSaved} />
+      <form onSubmit={handleSubmit} className="mt-6">
       <ErrorBanner message={error} />
       <div className="grid gap-6">
         <div className="card space-y-5 p-6">
@@ -277,7 +288,223 @@ function ConfigTab({ store, onSaved }) {
           </button>
         </div>
       </div>
-    </form>
+      </form>
+    </div>
+  )
+}
+
+// Tài khoản đăng nhập cổng tự phục vụ (/portal) của chủ cửa hàng — TÁCH KHỎI <form>
+// cấu hình bot ở trên vì đây là sửa bảng `users` (danh tính đăng nhập), không phải
+// sửa dữ liệu `stores`; gộp chung 1 form rất dễ gây hiểu lầm "Lưu thay đổi" cũng đổi
+// luôn mật khẩu. 3 cửa hàng demo builtin không có owner_email (dùng chung tenant nội
+// bộ) — hiện ghi chú giải thích thay vì khối trống khó hiểu.
+function OwnerAccountCard({ store }) {
+  const { user } = useAuth()
+  const [resetting, setResetting] = useState(false)
+  const [newPassword, setNewPassword] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [done, setDone] = useState(false)
+
+  async function handleReset(e) {
+    e.preventDefault()
+    setError('')
+    if (newPassword.length < 6) {
+      setError('Mật khẩu cần ít nhất 6 ký tự.')
+      return
+    }
+    setBusy(true)
+    try {
+      await api.resetOwnerPassword(store.id, newPassword)
+      setDone(true)
+      setNewPassword('')
+      setResetting(false)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="card p-6">
+      <div className="flex items-start gap-3">
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-indigo-500/15 text-indigo-400">
+          <UserRound size={18} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <h3 className="text-sm font-semibold text-fg">Tài khoản chủ cửa hàng</h3>
+          {store.owner_email ? (
+            <>
+              <p className="mt-0.5 text-xs text-fg/45">
+                Đăng nhập tại cổng tự phục vụ (<code className="text-fg/60">/portal</code>) bằng email này.
+              </p>
+              <p className="mt-2.5 text-sm text-fg/90">{store.owner_email}</p>
+
+              {user?.role === 'super_admin' && (
+                <div className="mt-3.5 border-t border-fg/[0.06] pt-3.5">
+                  <ErrorBanner message={error} />
+                  {done && !resetting && (
+                    <p className="mb-2 text-xs text-emerald-700 dark:text-emerald-400">Đã đặt mật khẩu mới ✓</p>
+                  )}
+                  {!resetting ? (
+                    <button
+                      type="button"
+                      onClick={() => { setResetting(true); setDone(false) }}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-line-strong px-3 py-1.5 text-xs font-medium text-fg transition-colors hover:bg-fg/[0.05]"
+                    >
+                      <KeyRound size={13} />
+                      Đặt lại mật khẩu
+                    </button>
+                  ) : (
+                    <form onSubmit={handleReset} className="flex flex-wrap items-start gap-2.5">
+                      <div className="relative">
+                        <input
+                          autoFocus
+                          type={showPassword ? 'text' : 'password'}
+                          value={newPassword}
+                          onChange={(e) => setNewPassword(e.target.value)}
+                          placeholder="Mật khẩu mới (≥ 6 ký tự)"
+                          className="input w-56 pr-9 text-sm"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowPassword((s) => !s)}
+                          aria-label={showPassword ? 'Ẩn' : 'Hiện'}
+                          className="absolute right-1 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md text-fg/40 hover:text-fg/70"
+                        >
+                          {showPassword ? <EyeOff size={14} /> : <Eye size={14} />}
+                        </button>
+                      </div>
+                      <button type="submit" disabled={busy} className="btn-primary px-3.5 py-2 text-xs">
+                        {busy ? 'Đang lưu…' : 'Xác nhận'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setResetting(false); setNewPassword(''); setError('') }}
+                        className="px-2 py-2 text-xs font-medium text-fg/45 hover:text-fg/75"
+                      >
+                        Huỷ
+                      </button>
+                    </form>
+                  )}
+                </div>
+              )}
+            </>
+          ) : (
+            <p className="mt-1.5 text-xs text-fg/40">
+              Cửa hàng demo dựng sẵn, dùng chung tài khoản nội bộ — không có chủ sở hữu riêng.
+            </p>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// Khối "Gói dịch vụ" — hiển thị gói hiện tại + feature set cho MỌI role; chỉ super_admin
+// (Q4) mới thấy control đổi gói (select + nút Lưu). tenant_owner chỉ xem, kèm hướng dẫn
+// tĩnh "Liên hệ quản trị viên" (Q5-b, không phải mailto bấm được vì chưa có email hỗ trợ
+// thật). TÁCH KHỎI <form> cấu hình bot (giống lý do OwnerAccountCard tách riêng) — đổi
+// gói là sửa bảng `tenants`, không phải `stores`.
+function PlanCard({ store, onChanged }) {
+  const { user } = useAuth()
+  const [plansList, setPlansList] = useState(null)
+  const [planId, setPlanId] = useState(store.plan_id)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [saved, setSaved] = useState(false)
+
+  useEffect(() => {
+    if (user?.role === 'super_admin' && !store.builtin) {
+      api.listPlans().then(setPlansList).catch((e) => setError(e.message))
+    }
+  }, [user?.role, store.builtin])
+
+  useEffect(() => {
+    setPlanId(store.plan_id)
+    setSaved(false)
+  }, [store.plan_id])
+
+  async function handleSave(e) {
+    e.preventDefault()
+    setError('')
+    setSaved(false)
+    setBusy(true)
+    try {
+      await api.setPlan(store.id, planId)
+      setSaved(true)
+      onChanged()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="card mt-6 p-6">
+      <div className="flex items-start gap-3">
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-indigo-500/15 text-indigo-400">
+          <Box size={18} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <h3 className="text-sm font-semibold text-fg">Gói dịch vụ</h3>
+          <p className="mt-0.5 text-xs text-fg/45">Quyết định những kênh/tính năng cửa hàng này được dùng.</p>
+
+          {store.builtin ? (
+            <p className="mt-3 text-xs text-fg/40">
+              Cửa hàng demo dựng sẵn, dùng chung gói nội bộ ({store.plan_label}) — không đổi riêng được.
+            </p>
+          ) : (
+            <>
+              <p className="mt-3 text-sm text-fg/90">
+                Hiện tại: <strong>{store.plan_label}</strong>
+              </p>
+              <ul className="mt-1.5 flex flex-wrap gap-1.5">
+                {(store.plan_features || []).map((f) => (
+                  <li key={f} className="rounded-full bg-fg/[0.06] px-2 py-0.5 text-[11px] text-fg/55">
+                    {CHANNEL_LABELS[f] || f}
+                  </li>
+                ))}
+              </ul>
+
+              {user?.role === 'super_admin' ? (
+                <div className="mt-3.5 border-t border-fg/[0.06] pt-3.5">
+                  <ErrorBanner message={error} />
+                  {saved && <p className="mb-2 text-xs text-emerald-700 dark:text-emerald-400">Đã đổi gói ✓</p>}
+                  <p className="mb-2 text-xs text-fg/40">
+                    Gói áp dụng cho TOÀN BỘ cửa hàng của khách hàng này (tenant), không chỉ riêng cửa hàng
+                    đang xem. Hạ gói sẽ tự tắt những kênh không còn thuộc gói mới.
+                  </p>
+                  <form onSubmit={handleSave} className="flex flex-wrap items-center gap-2.5">
+                    <select
+                      value={planId}
+                      onChange={(e) => { setPlanId(e.target.value); setSaved(false) }}
+                      className="input w-52 text-sm"
+                    >
+                      {(plansList || [{ key: store.plan_id, label: store.plan_label }]).map((p) => (
+                        <option key={p.key} value={p.key}>{p.label}</option>
+                      ))}
+                    </select>
+                    <button
+                      type="submit"
+                      disabled={busy || planId === store.plan_id}
+                      className="btn-primary px-3.5 py-2 text-xs"
+                    >
+                      {busy ? 'Đang lưu…' : 'Đổi gói'}
+                    </button>
+                  </form>
+                </div>
+              ) : (
+                <p className="mt-3 text-xs text-fg/40">Liên hệ quản trị viên để nâng cấp gói.</p>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -408,11 +635,12 @@ function OrdersTab({ storeId }) {
         </div>
       )}
       <div className="scrollbar-thin max-h-[560px] overflow-x-auto overflow-y-auto">
-        <table className="w-full min-w-[640px] text-sm">
+        <table className="w-full min-w-[740px] text-sm">
           <thead className="sticky top-0 bg-surface text-left text-fg/40">
             <tr>
               <th className="px-5 py-3 font-medium">Mã đơn</th>
               <th className="px-5 py-3 font-medium">Khách</th>
+              <th className="px-5 py-3 font-medium">Kênh</th>
               <th className="px-5 py-3 font-medium">Trạng thái</th>
               <th className="px-5 py-3 text-right font-medium">Tổng tiền</th>
               <th className="px-5 py-3 font-medium">Lúc</th>
@@ -432,6 +660,9 @@ function OrdersTab({ storeId }) {
                   </span>
                 </td>
                 <td className="px-5 py-3 text-fg/90">{o.customer_name}</td>
+                <td className="px-5 py-3">
+                  <ChannelPill channel={o.channel} />
+                </td>
                 <td className="px-5 py-3">
                   <div className="flex flex-wrap items-center gap-1.5">
                     <StatusPill status={o.status} />
@@ -463,6 +694,23 @@ function StatusPill({ status }) {
   return <span className={'rounded-full px-2.5 py-1 text-xs font-medium ' + cls}>{status}</span>
 }
 
+// Nhãn kênh nguồn của đơn (P1-1) — `orders.channel` lưu giá trị đúng theo
+// `stores.CHANNEL_TYPES` ("facebook"/"zalo_oa"/"zalo_personal"); giá trị lạ/rỗng (dữ liệu
+// cũ chèn tay, không kỳ vọng xảy ra với dữ liệu qua bot vì cột NOT NULL) hiện "—".
+function ChannelPill({ channel }) {
+  if (!channel) return <span className="text-xs text-fg/30">—</span>
+  const label = CHANNEL_LABELS[channel] || channel
+  const cls =
+    channel === 'facebook'
+      ? 'bg-blue-500/15 text-blue-700 dark:text-blue-400'
+      : channel === 'zalo_personal'
+      ? 'bg-sky-500/15 text-sky-700 dark:text-sky-400'
+      : channel === 'zalo_oa'
+      ? 'bg-amber-500/15 text-amber-700 dark:text-amber-400'
+      : 'bg-fg/[0.06] text-fg/50'
+  return <span className={'rounded-full px-2.5 py-1 text-xs font-medium ' + cls}>{label}</span>
+}
+
 function EmptyState({ icon: Icon, text }) {
   return (
     <div className="card flex flex-col items-center gap-2 py-14 text-fg/35">
@@ -479,6 +727,17 @@ function BizBadge({ store }) {
     <span className="inline-flex items-center gap-1.5 rounded-full bg-fg/[0.06] px-2.5 py-1 text-xs font-medium text-fg/60">
       <Icon size={12} />
       {biz.label}
+    </span>
+  )
+}
+
+// Badge gói dịch vụ cạnh BizBadge ở header — chỉ hiển thị (không bấm được ở đây), đổi
+// gói thật làm ở khối PlanCard trong tab Cấu hình (xem bên dưới).
+function PlanBadge({ store }) {
+  return (
+    <span className="inline-flex items-center gap-1.5 rounded-full bg-indigo-500/15 px-2.5 py-1 text-xs font-medium text-indigo-700 dark:text-indigo-300">
+      <Box size={12} />
+      Gói {store.plan_label}
     </span>
   )
 }

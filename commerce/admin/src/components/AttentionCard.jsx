@@ -29,11 +29,14 @@ export default function AttentionCard({ store: s, info }) {
   const tone = TONE[info.severity] || TONE.setup
   return (
     <div className={'card flex flex-wrap items-start justify-between gap-4 border-l-4 p-5 ' + tone.borderL}>
-      <div className="flex items-start gap-3.5">
+      <Link
+        to={`/stores/${s.id}`}
+        className="group flex min-w-0 flex-1 items-start gap-3.5 rounded-lg focus-visible:outline-none"
+      >
         <Icon size={18} className="mt-0.5 shrink-0 text-fg3" />
-        <div>
+        <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
-            <h3 className="text-base font-semibold text-fg">{s.name}</h3>
+            <h3 className="text-base font-semibold text-fg group-hover:underline">{s.name}</h3>
             <span className={'stamp ' + tone.stamp}>{tone.label}</span>
           </div>
           <p className="mt-1 text-sm text-fg/60">
@@ -47,7 +50,7 @@ export default function AttentionCard({ store: s, info }) {
             </p>
           )}
         </div>
-      </div>
+      </Link>
       <Link
         to={`/stores/${s.id}?tab=channels`}
         className="btn-primary flex shrink-0 items-center gap-1.5 self-center px-3.5 py-2 text-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-400"

@@ -15,7 +15,10 @@ export default function ChannelStoreCell({ store }) {
       </span>
       <div>
         <div className="text-sm font-medium text-fg">{store.name}</div>
-        <div className="text-xs text-fg3">{biz.label}</div>
+        <div className="text-xs text-fg3">
+          {biz.label}
+          {store.plan_label && <> · {store.plan_label}</>}
+        </div>
       </div>
     </div>
   )

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { PlusCircle } from 'lucide-react'
+import { Check, Copy, PlusCircle } from 'lucide-react'
 import { api } from '../lib/api'
 import { bizOf } from '../lib/business'
 import ErrorBanner from '../components/ErrorBanner'
@@ -19,14 +19,19 @@ const initial = {
   fb_page_id: '',
   fb_page_token: '',
   tone: 'warm',
+  owner_email: '',
+  owner_password: '',
+  plan_id: '',
 }
 
 export default function CreateStorePage() {
   const [form, setForm] = useState(initial)
   const [types, setTypes] = useState(null)
+  const [plans, setPlans] = useState(null)
   const [error, setError] = useState('')
   const [fieldErrors, setFieldErrors] = useState({})
   const [saving, setSaving] = useState(false)
+  const [created, setCreated] = useState(null)
   const navigate = useNavigate()
 
   // Danh sách ngành hàng lấy TỪ BACKEND (app/business_types.py) — không hardcode ở đây
@@ -37,6 +42,18 @@ export default function CreateStorePage() {
       .then((list) => {
         setTypes(list)
         if (list.length > 0) applyBusinessType(list[0])
+      })
+      .catch((e) => setError(e.message))
+    // Danh sách gói cũng lấy từ backend (app/plans.py) — cùng lý do: thêm 1 gói mới chỉ
+    // sửa Python, không phải build lại admin UI.
+    api.listPlans()
+      .then((list) => {
+        setPlans(list)
+        // Mặc định "basic" (gói bán cho khách thật) chứ không phải gói xếp đầu tiên khi
+        // sort theo order — order 0 là "internal_unlimited" (nội bộ/demo), không nên là
+        // lựa chọn ngầm định khi cấp tài khoản cho một khách hàng trả phí thật.
+        const def = list.find((p) => p.key === 'basic') || list[0]
+        if (def) setForm((f) => ({ ...f, plan_id: def.key }))
       })
       .catch((e) => setError(e.message))
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -72,6 +89,12 @@ export default function CreateStorePage() {
     if (payload.variant_mode === 'so' && payload.variant_min > payload.variant_max) {
       errs.variant_min = 'Số nhỏ nhất phải nhỏ hơn hoặc bằng số lớn nhất.'
     }
+    if (!payload.owner_email) {
+      errs.owner_email = 'Cần email để tạo tài khoản đăng nhập cho chủ cửa hàng.'
+    }
+    if (payload.owner_password.length < 6) {
+      errs.owner_password = 'Mật khẩu cần ít nhất 6 ký tự.'
+    }
     return errs
   }
 
@@ -90,8 +113,11 @@ export default function CreateStorePage() {
     if (Object.keys(errs).length > 0) return
     setSaving(true)
     try {
-      const created = await api.createStore(payload)
-      navigate(`/stores/${created.id}`)
+      const st = await api.createStore(payload)
+      // Màn bàn giao (P1-3) THAY vì navigate thẳng tới chi tiết — chỉ hiện khi tạo
+      // THÀNH CÔNG; lỗi (vd email trùng) vẫn giữ nguyên form + ErrorBanner như cũ (nhánh
+      // catch bên dưới không đổi).
+      setCreated(st)
     } catch (err) {
       setError(err.message)
     } finally {
@@ -99,8 +125,12 @@ export default function CreateStorePage() {
     }
   }
 
+  if (created) {
+    return <HandoffScreen store={created} ownerEmail={form.owner_email} navigate={navigate} />
+  }
+
   return (
-    <div className="max-w-2xl">
+    <div className="max-w-2xl mx-auto">
       <div className="mb-8 flex items-center gap-3">
         <span className="flex h-11 w-11 items-center justify-center rounded-lg border-2 border-indigo-800 bg-indigo-700 shadow-[2px_2px_0_var(--color-indigo-800)]">
           <PlusCircle size={20} className="text-white" />
@@ -202,10 +232,111 @@ export default function CreateStorePage() {
           </Field>
         </div>
 
+        <div className="mt-6 border-t border-fg/[0.06] pt-5">
+          <h3 className="mb-1 text-sm font-semibold text-fg/70">Tài khoản chủ cửa hàng</h3>
+          <p className="mb-4 text-xs text-fg/40">
+            Cửa hàng mới luôn thuộc một khách hàng (tenant) riêng — chủ cửa hàng đăng nhập bằng tài
+            khoản này để tự cấu hình, không thấy được cửa hàng của khách hàng khác.
+          </p>
+          <div className="grid gap-5 sm:grid-cols-2">
+            <Field label="Email đăng nhập" error={fieldErrors.owner_email}>
+              <input
+                type="email"
+                value={form.owner_email}
+                onChange={set('owner_email')}
+                className="input"
+                placeholder="chuxxx@example.com"
+              />
+            </Field>
+            <Field label="Mật khẩu" hint="Ít nhất 6 ký tự" error={fieldErrors.owner_password}>
+              <input
+                type="password"
+                value={form.owner_password}
+                onChange={set('owner_password')}
+                className="input"
+                placeholder="••••••••"
+              />
+            </Field>
+          </div>
+          <div className="mt-4">
+            <Field label="Gói dịch vụ" hint="Quyết định những kênh/tính năng cửa hàng được dùng">
+              {!plans && !error && <p className="text-sm text-fg/40">Đang tải danh sách gói…</p>}
+              {plans && (
+                <select value={form.plan_id} onChange={set('plan_id')} className="input max-w-xs">
+                  {plans.map((p) => (
+                    <option key={p.key} value={p.key}>{p.label}</option>
+                  ))}
+                </select>
+              )}
+            </Field>
+          </div>
+        </div>
+
         <button type="submit" disabled={saving} className="btn-primary mt-7 w-full py-2.5">
           {saving ? 'Đang tạo…' : 'Tạo cửa hàng'}
         </button>
       </form>
+    </div>
+  )
+}
+
+// Màn bàn giao sau khi tạo cửa hàng (P1-3) — liệt kê link đăng nhập cổng tự phục vụ +
+// email chủ cửa hàng. KHÔNG hiện lại mật khẩu (mặc định an toàn hơn theo kế hoạch —
+// admin vừa tự gõ mật khẩu lúc tạo, để họ tự nhớ/lưu riêng thay vì hệ thống hiện lại).
+function HandoffScreen({ store, ownerEmail, navigate }) {
+  const [copied, setCopied] = useState(false)
+  const portalUrl = `${window.location.origin}/portal`
+
+  function handleCopy() {
+    const text = `Link đăng nhập: ${portalUrl}\nEmail: ${ownerEmail}\n(Mật khẩu đã đặt lúc tạo cửa hàng — gửi riêng cho khách, hệ thống không hiển thị lại.)`
+    navigator.clipboard?.writeText(text).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    })
+  }
+
+  return (
+    <div className="mx-auto max-w-xl">
+      <div className="card p-6">
+        <div className="mb-5 flex items-center gap-3">
+          <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-emerald-500/15 text-emerald-500">
+            <Check size={20} />
+          </span>
+          <div>
+            <h1 className="text-xl font-semibold tracking-tight text-fg">Tạo cửa hàng thành công</h1>
+            <p className="text-sm text-fg/45">Bàn giao thông tin đăng nhập cho chủ cửa hàng.</p>
+          </div>
+        </div>
+
+        <div className="space-y-3 rounded-lg border border-fg/[0.08] bg-fg/[0.02] p-4 text-sm">
+          <div>
+            <span className="block text-xs font-medium text-fg/40">Link đăng nhập cổng tự phục vụ</span>
+            <span className="text-fg/90">{portalUrl}</span>
+          </div>
+          <div>
+            <span className="block text-xs font-medium text-fg/40">Email chủ cửa hàng</span>
+            <span className="text-fg/90">{ownerEmail}</span>
+          </div>
+          <p className="text-xs text-fg/40">
+            Mật khẩu đã đặt lúc tạo cửa hàng ở bước trước — gửi riêng cho khách qua kênh an toàn
+            (không phải hệ thống này), hệ thống không lưu/hiển thị lại mật khẩu đó.
+          </p>
+        </div>
+
+        <div className="mt-5 flex flex-wrap gap-3">
+          <button
+            type="button"
+            onClick={handleCopy}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-line-strong px-3.5 py-2 text-sm font-medium text-fg transition-colors hover:bg-fg/[0.05]"
+          >
+            {copied ? <Check size={14} /> : <Copy size={14} />}
+            {copied ? 'Đã copy' : 'Copy thông tin'}
+          </button>
+          <button type="button" onClick={() => navigate(`/stores/${store.id}`)} className="btn-primary px-4 py-2 text-sm">
+            Tới chi tiết cửa hàng
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
