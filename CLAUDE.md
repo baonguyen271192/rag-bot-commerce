@@ -4,37 +4,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repo overview
 
-This repo holds **two unrelated products**, each self-contained with its own dependencies and run commands. There is no root `package.json` — always `cd` into the relevant subproject first.
+This repo holds **one product**: `commerce/` — a multi-tenant order-taking chatbot. There is no root `package.json` — always `cd commerce` (or `cd commerce/admin`, `cd commerce/zalo-bridge`) first.
 
-1. **`backend/` + `bridge/`** — multi-tenant RAG chatbot for restaurants over **Zalo**. `backend` owns tenant config/documents/vector search/LLM; `bridge` owns N Zalo (`zca-js`) sessions (one per tenant) and calls `backend` over HTTP for replies. Node.js/Express, no shared process.
-2. **`commerce/`** — multi-tenant order-taking chatbot over **Facebook Messenger** (webhook), **Zalo OA** (webhook, framework-only — no official docs yet, see below), and **Zalo personal accounts** (via a forked sidecar, `commerce/zalo-bridge/`), for retail/food businesses. Also ships its own admin web app (`commerce/admin/`, React) served by the same FastAPI process. Python/FastAPI + a small Node.js sidecar.
+`commerce/` — multi-tenant order-taking chatbot over **Facebook Messenger** (webhook), **Zalo OA** (webhook, framework-only — no official docs yet, see below), and **Zalo personal accounts** (via a forked sidecar, `commerce/zalo-bridge/`), for retail/food businesses. Also ships its own admin web app (`commerce/admin/`, React) served by the same FastAPI process. Python/FastAPI + a small Node.js sidecar.
 
-`docs/specs/` and `docs/plans/` contain the original design docs for the Zalo system (dated 2026-09-04/05/07) — read `docs/specs/2026-09-04-zalo-rag-bot-design.md` for the full rationale before making architectural changes there. `reference/` is explicitly **not shipped code** — prototype/scraped data kept only for comparison.
+`reference/` is explicitly **not shipped code** — prototype/scraped data kept only for comparison.
 
-Note: the design doc's diagram includes an `admin-ui/` (React) component for the Zalo system. That directory was removed from the working tree and does not currently exist — do not assume it is present.
+Note: an earlier, unrelated Zalo RAG chatbot product (`backend/` + `bridge/`, Node.js) that used to live alongside `commerce/` in this same repo has been **removed entirely** (both the working tree and git history going forward) — don't assume those directories, or the design docs that described them (`docs/specs/2026-09-04-zalo-rag-bot-design.md` and similar), still apply to anything in this repo.
 
 ---
-
-## `backend/` (Zalo RAG — Node/Express)
-
-**Run:** `cd backend && npm install && OPENAI_API_KEY=... OPENROUTER_API_KEY=... node index.js` (port `4001` via `PORT`).
-**Test:** `npm test` (= `node --test test/*.js`). Run a single file: `node --test test/rag.test.js`.
-
-Required env: `OPENROUTER_API_KEY` (chat LLM), `OPENAI_API_KEY` (embeddings, unless `EMBEDDING_PROVIDER=gemini` then `GEMINI_API_KEY`). See `backend/README.md` for the full env var list and API surface (tenants, documents, ask, image retrieval).
-
-**Architecture (data flow for one `ask` call):**
-`src/routes/ask.js` → `src/rag.js` (orchestrator) → embed the question via `src/embeddings.js` → similarity search in `src/vectorstore.js` (LanceDB, **one table per tenant**, `vectors/<tenant-id>`) → build prompt from tenant's `system_prompt` (SQLite, `src/db.js`) + retrieved chunks → `src/llm.js` (OpenRouter, vision-capable model for image questions).
-
-Non-obvious: `src/rag.js` filters which retrieved chunks get their source image attached to the reply using `MAX_ATTACHMENT_DISTANCE` — vector search always returns its k nearest rows even when nothing is truly relevant, so a vague/off-topic message would otherwise get an unrelated menu photo attached. If you touch attachment logic, respect this distance cutoff rather than attaching every chunk with a `page`.
-
-Documents: `.md`/`.txt` are chunked directly (`src/chunker.js`); `.jpg`/`.png` go through the vision LLM to extract text first; `.pdf` uses `pdf-parse` to extract per-page text (chunk tagged with its page number) **and** renders each page to PNG so the bot can send back the real page image later.
-
-## `bridge/` (Zalo transport — Node/Express)
-
-**Run:** `cd bridge && npm install && BACKEND_URL=http://localhost:4001 node index.js` (status API on port `4002` via `STATUS_PORT`).
-**Test:** `npm test` (= `node --test 'test/**/*.js'`).
-
-`src/manager.js` discovers tenants by calling `GET {BACKEND_URL}/tenants` **once at startup** and creates one `src/tenant-session.js` per tenant, each wrapping a `zca-js` login (`src/zalo-session.js`) with its own QR/credentials under `bridge/data/<tenant-id>/`. Adding a tenant on `backend` requires restarting `bridge` — it does not poll for new tenants. `src/message-handler.js` filters to DMs and `@`-mentions in group chats before forwarding to `backend`'s `/ask`. Bridge holds no tenant config/documents itself — it's a pure transport layer.
 
 ## `commerce/` (Messenger commerce bot — Python/FastAPI)
 
