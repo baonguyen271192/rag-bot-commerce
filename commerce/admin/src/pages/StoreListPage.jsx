@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, Navigate } from 'react-router-dom'
 import { Plus, Search } from 'lucide-react'
 import { useStoreOverview } from '../hooks/useStoreOverview'
 import { useAuth } from '../lib/auth'
@@ -11,11 +11,20 @@ export default function StoreListPage() {
   const { user } = useAuth()
   const [query, setQuery] = useState('')
 
+  // Chủ cửa hàng chỉ có đúng 1 store (xem stores.provision_tenant_store) — danh sách
+  // 1 dòng rồi bắt click thêm lần nữa vào đúng dòng đó là thừa thao tác, nên vào thẳng
+  // trang chi tiết. Chỉ super_admin mới thực sự cần xem danh sách nhiều cửa hàng.
+  if (user?.role !== 'super_admin' && stores?.length === 1) {
+    return <Navigate to={`/stores/${stores[0].id}/config`} replace />
+  }
+
   const filtered = useMemo(() => {
     if (!stores) return null
     const q = query.trim().toLowerCase()
     if (!q) return stores
-    return stores.filter((s) => s.name.toLowerCase().includes(q))
+    return stores.filter(
+      (s) => s.name.toLowerCase().includes(q) || (s.owner_email || '').toLowerCase().includes(q),
+    )
   }, [stores, query])
 
   return (
@@ -62,7 +71,7 @@ export default function StoreListPage() {
               <input
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="Tìm cửa hàng theo tên…"
+                placeholder="Tìm theo tên hoặc email chủ cửa hàng…"
                 className="input w-56 py-1.5 pl-8 text-sm"
               />
             </label>

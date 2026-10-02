@@ -1,4 +1,5 @@
 import { bizOf } from '../lib/business'
+import { IS_PORTAL } from '../lib/console'
 
 // Ô "Cửa hàng" (avatar theo ngành + tên + nhãn ngành) — dùng chung cho cả 3 trang
 // kênh tổng hợp, khớp cột "Cửa hàng" trong docs/channels-ia-mockup.html.
@@ -19,6 +20,10 @@ export default function ChannelStoreCell({ store }) {
           {biz.label}
           {store.plan_label && <> · {store.plan_label}</>}
         </div>
+        {/* Email chủ cửa hàng — chỉ admin cần (quản lý nhiều khách hàng, cần biết đang
+            xem cửa hàng của ai); portal là chính chủ shop đó, thấy lại email mình ở đây
+            là thừa, đã có sẵn ở footer sidebar rồi. */}
+        {!IS_PORTAL && store.owner_email && <div className="text-xs text-fg3/70">{store.owner_email}</div>}
       </div>
     </div>
   )

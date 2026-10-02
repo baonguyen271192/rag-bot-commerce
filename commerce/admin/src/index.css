@@ -79,6 +79,27 @@
   --color-violet-950: #3c1c0e;
 }
 
+/* Cổng /portal (chủ cửa hàng) dùng màu HÀNH ĐỘNG CHÍNH khác admin để không bị nhầm 2
+   console là 1 trang — tái dùng NGUYÊN VĂN ramp "đất nung" (--color-violet-*) vốn đã có
+   sẵn, không bịa màu mới. CHỈ đổi indigo (primary/active-nav/focus-ring) — KHÔNG đổi
+   emerald (badge "tốt/đã kết nối" phải luôn xanh lá ở cả 2 cổng, đúng quy ước universal,
+   không phải màu thương hiệu). `[data-console]` set 1 lần lúc load (main.jsx), độc lập
+   với `[data-theme]` (dark/light) — 2 thuộc tính khác nhau trên cùng <html>, không xung
+   đột thứ tự áp dụng. */
+:root[data-console="portal"] {
+  --color-indigo-50: var(--color-violet-50);
+  --color-indigo-100: var(--color-violet-100);
+  --color-indigo-200: var(--color-violet-200);
+  --color-indigo-300: var(--color-violet-300);
+  --color-indigo-400: var(--color-violet-400);
+  --color-indigo-500: var(--color-violet-500);
+  --color-indigo-600: var(--color-violet-600);
+  --color-indigo-700: var(--color-violet-700);
+  --color-indigo-800: var(--color-violet-800);
+  --color-indigo-900: var(--color-violet-900);
+  --color-indigo-950: var(--color-violet-950);
+}
+
 /* ── Semantic color tokens ──────────────────────────────────────────────────
    Khai báo qua @theme để Tailwind v4 sinh sẵn các utility (bg-app, text-fg,
    border-line…) tham chiếu trực tiếp tới custom property — đổi giá trị biến ở
@@ -178,9 +199,12 @@ body {
   }
 
   .input:focus {
-    border-color: rgba(31, 111, 92, 0.65);
+    /* color-mix() thay rgba() cứng — đọc được biến --color-indigo-700 nên đổi màu theo
+       [data-console] (portal) giống .btn-primary, không chỉ còn mỗi admin có viền focus
+       đúng màu thương hiệu. */
+    border-color: color-mix(in srgb, var(--color-indigo-700) 65%, transparent);
     background: color-mix(in srgb, var(--color-fg) 6%, transparent);
-    box-shadow: 0 0 0 3px rgba(31, 111, 92, 0.18);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-indigo-700) 18%, transparent);
   }
 
   .input::placeholder {
@@ -196,15 +220,18 @@ body {
 
   .btn-primary {
     border-radius: 0.5rem;
-    background: #1f6f5c;
+    /* Đọc biến (không hex cứng) để đổi màu theo [data-console] (xem khối portal ở trên)
+       — trước đây hardcode đúng giá trị indigo-700 nên admin không lộ bug, nhưng portal
+       sẽ không đổi màu được nếu giữ hex cứng. */
+    background: var(--color-indigo-700);
     color: #f4f1e8;
     font-weight: 600;
     transition: background-color 0.15s, transform 0.1s;
-    box-shadow: 0 4px 14px -4px rgba(31, 111, 92, 0.45);
+    box-shadow: 0 4px 14px -4px rgba(0, 0, 0, 0.35);
   }
 
   .btn-primary:hover {
-    background: #24816b;
+    background: var(--color-indigo-600);
   }
 
   .btn-primary:active {

@@ -162,6 +162,79 @@ def init_db() -> None:
                 flag_note         TEXT,
                 FOREIGN KEY (store_id) REFERENCES stores(id)
             );
+
+            CREATE TABLE IF NOT EXISTS customers (
+                id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                store_id       TEXT NOT NULL,
+                phone          TEXT NOT NULL,
+                name           TEXT,
+                address        TEXT,
+                points_balance INTEGER NOT NULL DEFAULT 0,
+                order_count    INTEGER NOT NULL DEFAULT 0,
+                total_spent    INTEGER NOT NULL DEFAULT 0,
+                first_order_at TEXT,
+                last_order_at  TEXT,
+                UNIQUE (store_id, phone),
+                FOREIGN KEY (store_id) REFERENCES stores(id)
+            );
+            CREATE INDEX IF NOT EXISTS ix_customers_store ON customers(store_id);
+
+            CREATE TABLE IF NOT EXISTS loyalty_transactions (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                customer_id INTEGER NOT NULL,
+                order_id    TEXT,
+                delta       INTEGER NOT NULL,
+                reason      TEXT NOT NULL,
+                created_at  TEXT NOT NULL,
+                FOREIGN KEY (customer_id) REFERENCES customers(id),
+                FOREIGN KEY (order_id) REFERENCES orders(id)
+            );
+            CREATE INDEX IF NOT EXISTS ix_loyalty_customer ON loyalty_transactions(customer_id);
+
+            CREATE TABLE IF NOT EXISTS coupons (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                store_id   TEXT NOT NULL,
+                code       TEXT NOT NULL,
+                type       TEXT NOT NULL CHECK (type IN ('percent','amount')),
+                value      INTEGER NOT NULL,
+                max_uses   INTEGER,
+                used_count INTEGER NOT NULL DEFAULT 0,
+                active     INTEGER NOT NULL DEFAULT 1,
+                expires_at TEXT,
+                created_at TEXT NOT NULL,
+                UNIQUE (store_id, code),
+                FOREIGN KEY (store_id) REFERENCES stores(id)
+            );
+            CREATE INDEX IF NOT EXISTS ix_coupons_store ON coupons(store_id);
+
+            CREATE TABLE IF NOT EXISTS inventory_log (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                store_id     TEXT NOT NULL,
+                product_code TEXT NOT NULL,
+                size         TEXT,
+                delta        INTEGER NOT NULL,
+                reason       TEXT NOT NULL,
+                created_at   TEXT NOT NULL,
+                FOREIGN KEY (store_id) REFERENCES stores(id)
+            );
+            CREATE INDEX IF NOT EXISTS ix_inventory_log_store_code ON inventory_log(store_id, product_code);
+
+            CREATE TABLE IF NOT EXISTS conversation_messages (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                store_id     TEXT NOT NULL,
+                channel      TEXT NOT NULL,
+                sender_id    TEXT NOT NULL,
+                direction    TEXT NOT NULL CHECK (direction IN ('in','out')),
+                msg_type     TEXT NOT NULL DEFAULT 'text',
+                text         TEXT NOT NULL DEFAULT '',
+                payload_json TEXT,
+                created_at   TEXT NOT NULL,
+                FOREIGN KEY (store_id) REFERENCES stores(id)
+            );
+            CREATE INDEX IF NOT EXISTS ix_convmsg_thread
+                ON conversation_messages(store_id, channel, sender_id, id);
+            CREATE INDEX IF NOT EXISTS ix_convmsg_store
+                ON conversation_messages(store_id, id);
             """
         )
         # Phòng thủ: nếu bảng `orders` được TẠO TRƯỚC (vd DB copy tay từ bản cũ chưa có
@@ -178,6 +251,33 @@ def init_db() -> None:
         if "plan_id" not in tenant_cols:
             c.execute(
                 "ALTER TABLE tenants ADD COLUMN plan_id TEXT NOT NULL DEFAULT 'internal_unlimited'")
+
+        # CRM + khuyến mãi + điểm tích luỹ + tách trạng thái thanh toán (xem
+        # create_order_with_promos bên dưới) — cột mới trên bảng `orders` đã tồn tại.
+        for name, ddl in (
+            ("customer_id", "ALTER TABLE orders ADD COLUMN customer_id INTEGER"),
+            ("payment_status",
+             "ALTER TABLE orders ADD COLUMN payment_status TEXT NOT NULL DEFAULT 'chưa thanh toán'"),
+            ("coupon_code", "ALTER TABLE orders ADD COLUMN coupon_code TEXT"),
+            ("discount_amount", "ALTER TABLE orders ADD COLUMN discount_amount INTEGER NOT NULL DEFAULT 0"),
+            ("points_redeemed", "ALTER TABLE orders ADD COLUMN points_redeemed INTEGER NOT NULL DEFAULT 0"),
+            ("points_earned", "ALTER TABLE orders ADD COLUMN points_earned INTEGER NOT NULL DEFAULT 0"),
+        ):
+            if name not in cols:
+                c.execute(ddl)
+
+        # Bật/tắt loyalty theo từng store — NULL = tắt (không ép mọi store phải dùng).
+        store_cols = {r["name"] for r in c.execute("PRAGMA table_info(stores)").fetchall()}
+        if "loyalty_spend_per_point" not in store_cols:
+            c.execute("ALTER TABLE stores ADD COLUMN loyalty_spend_per_point INTEGER")
+        if "loyalty_redeem_rate" not in store_cols:
+            c.execute("ALTER TABLE stores ADD COLUMN loyalty_redeem_rate INTEGER")
+
+        # Tồn kho generic cho ngành KHÔNG có size (food/mỹ phẩm/dịch vụ) — NULL = không
+        # theo dõi tồn kho (giữ nguyên hành vi hiện tại), có số thì mới kiểm/trừ atomically.
+        product_cols = {r["name"] for r in c.execute("PRAGMA table_info(products)").fetchall()}
+        if "stock_qty" not in product_cols:
+            c.execute("ALTER TABLE products ADD COLUMN stock_qty INTEGER")
 
 
 def now_iso() -> str:
@@ -328,6 +428,10 @@ def delete_store_row(store_id: str) -> None:
     with _conn() as c:
         c.execute("DELETE FROM products WHERE store_id=?", (store_id,))
         c.execute("DELETE FROM channels WHERE store_id=?", (store_id,))
+        # conversation_messages.store_id -> stores(id) có FK: nếu không xoá kèm, mọi cửa
+        # hàng từng có 1 tin nhắn được log sẽ không xoá được nữa (DELETE FROM stores bị
+        # chặn). Xem CÂU HỎI CÒN BỎ NGỎ #2 trong kế hoạch — chọn xoá kèm, giống products/channels.
+        c.execute("DELETE FROM conversation_messages WHERE store_id=?", (store_id,))
         c.execute("DELETE FROM stores WHERE id=?", (store_id,))
 
 
@@ -353,6 +457,7 @@ def _product_row_to_dict(row) -> dict:
         "retail": price,
         "wholesale": extra.get("wholesale", price),
         "sizes": sizes,
+        "stock_qty": row["stock_qty"] if "stock_qty" in row.keys() else None,
         "image": row["image_url"] or "",
         "images": extra.get("images") or [],
     }
@@ -395,23 +500,24 @@ def upsert_product(store_id: str, item: dict) -> dict:
         "wholesale": item.get("wholesale", price),
         "images": item.get("images") or [],
     }
+    stock_qty = item.get("stock_qty")
     sizes_json = json.dumps(sizes, ensure_ascii=False)
     extra_json = json.dumps(extra, ensure_ascii=False)
     with _conn() as c:
         c.execute(
             """INSERT INTO products (store_id, code, name, price, category, sizes_json,
-                                      image_url, extra_json)
-               VALUES (?,?,?,?,?,?,?,?)
+                                      image_url, extra_json, stock_qty)
+               VALUES (?,?,?,?,?,?,?,?,?)
                ON CONFLICT(store_id, code) DO UPDATE SET
                  name=excluded.name, price=excluded.price, category=excluded.category,
                  sizes_json=excluded.sizes_json, image_url=excluded.image_url,
-                 extra_json=excluded.extra_json""",
-            (store_id, code, name, price, category, sizes_json, image, extra_json),
+                 extra_json=excluded.extra_json, stock_qty=excluded.stock_qty""",
+            (store_id, code, name, price, category, sizes_json, image, extra_json, stock_qty),
         )
     return {
         "code": code, "base_code": extra["base_code"], "name": name, "category": category,
         "color": extra["color"], "description": extra["description"], "retail": price,
-        "wholesale": extra["wholesale"], "sizes": sizes, "image": image,
+        "wholesale": extra["wholesale"], "sizes": sizes, "stock_qty": stock_qty, "image": image,
         "images": extra["images"],
     }
 
@@ -626,6 +732,332 @@ def create_order_with_stock(items: list, subtotal: int, customer: dict, payment:
     return get_order(oid, store_id), None
 
 
+class _PromoConflict(Exception):
+    """Tín hiệu nội bộ: 1 bước validate/ghi ở create_order_with_promos() thất bại —
+    raise để `with _conn()` tự ROLLBACK TOÀN BỘ transaction (tồn kho đã trừ, used_count
+    coupon đã tăng, điểm đã trừ...) trong CÙNG 1 lần, thay vì tự viết code bù trừ tay."""
+
+    def __init__(self, kind: str, payload: dict):
+        self.kind = kind
+        self.payload = payload
+
+
+def calc_coupon_discount(coupon_row: dict, subtotal: int) -> int:
+    """Công thức DUY NHẤT tính giảm giá theo coupon — dùng lại ở cả lúc tạo đơn thật
+    (dưới khoá, có hiệu lực) lẫn lúc preview ở REVIEW (engine.py, chỉ để hiển thị)."""
+    if coupon_row["type"] == "percent":
+        pct = max(0, min(100, coupon_row["value"]))
+        return (subtotal * pct) // 100
+    return min(max(0, coupon_row["value"]), subtotal)
+
+
+def _validate_coupon_row(row: sqlite3.Row | None, today: str) -> dict | None:
+    if row is None:
+        return {"reason": "not_found"}
+    if not row["active"]:
+        return {"reason": "inactive"}
+    if row["expires_at"] and row["expires_at"] < today:
+        return {"reason": "expired"}
+    if row["max_uses"] is not None and row["used_count"] >= row["max_uses"]:
+        return {"reason": "exhausted"}
+    return None
+
+
+def _check_stock_for_items(c: sqlite3.Connection, store_id: str, items: list,
+                            has_size: bool) -> list[dict]:
+    shortages: list[dict] = []
+    if has_size:
+        stock: dict[str, dict] = {}
+        for it in items:
+            code = it["code"]
+            if code not in stock:
+                row = c.execute("SELECT sizes_json FROM products WHERE store_id=? AND code=?",
+                                 (store_id, code)).fetchone()
+                stock[code] = json.loads(row["sizes_json"]) if row and row["sizes_json"] else {}
+        for it in items:
+            sizes = stock.get(it["code"], {})
+            for size, qty in it["sizes"].items():
+                if sizes.get(size, 0) < qty:
+                    shortages.append({"code": it["code"], "name": it.get("name", it["code"]),
+                                       "size": size, "available": sizes.get(size, 0), "requested": qty})
+    else:
+        # Tồn kho generic CHỈ áp dụng cho sản phẩm có stock_qty KHÔNG NULL (opt-in) — sản
+        # phẩm NULL (mặc định) bỏ qua hoàn toàn, giữ đúng hành vi hiện tại (ngành food/mỹ
+        # phẩm/dịch vụ vốn không có khái niệm tồn kho, trừ khi chủ shop tự bật).
+        for it in items:
+            row = c.execute("SELECT stock_qty FROM products WHERE store_id=? AND code=?",
+                             (store_id, it["code"])).fetchone()
+            avail = row["stock_qty"] if row else None
+            if avail is None:
+                continue
+            if avail < it["qty_total"]:
+                shortages.append({"code": it["code"], "name": it.get("name", it["code"]),
+                                   "size": None, "available": avail, "requested": it["qty_total"]})
+    return shortages
+
+
+def _debit_stock_for_items(c: sqlite3.Connection, store_id: str, items: list,
+                            has_size: bool, created_at: str) -> None:
+    if has_size:
+        stock: dict[str, dict] = {}
+        for it in items:
+            code = it["code"]
+            if code not in stock:
+                row = c.execute("SELECT sizes_json FROM products WHERE store_id=? AND code=?",
+                                 (store_id, code)).fetchone()
+                stock[code] = json.loads(row["sizes_json"]) if row and row["sizes_json"] else {}
+        for it in items:
+            sizes = stock[it["code"]]
+            for size, qty in it["sizes"].items():
+                sizes[size] = sizes[size] - qty
+                c.execute(
+                    "INSERT INTO inventory_log (store_id, product_code, size, delta, reason, created_at) "
+                    "VALUES (?,?,?,?,?,?)",
+                    (store_id, it["code"], size, -qty, "order_create", created_at))
+            c.execute("UPDATE products SET sizes_json=? WHERE store_id=? AND code=?",
+                      (json.dumps(sizes, ensure_ascii=False), store_id, it["code"]))
+    else:
+        for it in items:
+            row = c.execute("SELECT stock_qty FROM products WHERE store_id=? AND code=?",
+                             (store_id, it["code"])).fetchone()
+            if row is None or row["stock_qty"] is None:
+                continue
+            new_qty = row["stock_qty"] - it["qty_total"]
+            c.execute("UPDATE products SET stock_qty=? WHERE store_id=? AND code=?",
+                      (new_qty, store_id, it["code"]))
+            c.execute(
+                "INSERT INTO inventory_log (store_id, product_code, size, delta, reason, created_at) "
+                "VALUES (?,?,NULL,?,?,?)",
+                (store_id, it["code"], -it["qty_total"], "order_create", created_at))
+
+
+def create_order_with_promos(items: list, subtotal: int, customer: dict, payment: str,
+                              channel: str, created_at: str, store_id: str,
+                              has_size: bool = False, coupon_code: str | None = None,
+                              points_to_redeem: int = 0) -> tuple[dict | None, dict | None]:
+    """Như `create_order_with_stock`, cộng thêm mã giảm giá + đổi điểm tích luỹ — TRONG
+    CÙNG 1 `_order_lock` + CÙNG 1 connection/transaction SQLite (khác bản `_with_stock` cũ
+    vốn mở 2 connection riêng cho 2 bước, chỉ atomic nhờ Python lock chứ không nhờ DB —
+    giờ có thêm nhiều bảng liên quan tiền phải rollback cùng nhau nên cần transaction thật).
+
+    Trả (order, None) khi thành công.
+    Trả (None, error) khi thất bại — KHÔNG tạo đơn, KHÔNG trừ/cộng bất kỳ gì:
+        {"kind": "stock", "shortages": [...]}
+        {"kind": "coupon", "reason": "not_found"|"inactive"|"expired"|"exhausted"|"race_conflict"}
+        {"kind": "points", "reason": "loyalty_disabled"|"insufficient"|"exceeds_total"|"race_conflict", ...}
+    """
+    coupon_code = (coupon_code or "").strip().upper() or None
+    points_to_redeem = max(0, int(points_to_redeem or 0))
+    phone = (customer.get("phone") or "").strip()
+    today = now_iso()[:10]  # so sánh CHỈ phần ngày (ISO, sortable) — không lẫn giờ UTC
+
+    with _order_lock:
+        try:
+            with _conn() as c:
+                # ---------- Pha 1: ĐỌC + VALIDATE, không ghi gì ----------
+                coupon_row = None
+                if coupon_code:
+                    coupon_row = c.execute(
+                        "SELECT * FROM coupons WHERE store_id=? AND code=?",
+                        (store_id, coupon_code)).fetchone()
+                    err = _validate_coupon_row(coupon_row, today)
+                    if err:
+                        raise _PromoConflict("coupon", err)
+
+                customer_row = None
+                if phone:
+                    customer_row = c.execute(
+                        "SELECT * FROM customers WHERE store_id=? AND phone=?",
+                        (store_id, phone)).fetchone()
+
+                store_row = c.execute(
+                    "SELECT loyalty_redeem_rate, loyalty_spend_per_point FROM stores WHERE id=?",
+                    (store_id,)).fetchone()
+                redeem_rate = (store_row["loyalty_redeem_rate"] if store_row else None) or 0
+                spend_per_point = (store_row["loyalty_spend_per_point"] if store_row else None) or 0
+
+                if points_to_redeem > 0:
+                    if not redeem_rate:
+                        raise _PromoConflict("points", {"reason": "loyalty_disabled"})
+                    balance = customer_row["points_balance"] if customer_row else 0
+                    if points_to_redeem > balance:
+                        raise _PromoConflict("points", {"reason": "insufficient",
+                                              "available": balance, "requested": points_to_redeem})
+
+                discount_coupon = calc_coupon_discount(coupon_row, subtotal) if coupon_row else 0
+                remaining = max(subtotal - discount_coupon, 0)
+                discount_points = points_to_redeem * redeem_rate
+                if discount_points > remaining:
+                    max_points = (remaining // redeem_rate) if redeem_rate else 0
+                    raise _PromoConflict("points", {"reason": "exceeds_total", "max_points": max_points})
+
+                discount_amount = discount_coupon + discount_points
+                final_total = subtotal - discount_amount
+                points_earned = (final_total // spend_per_point) if spend_per_point else 0
+
+                shortages = _check_stock_for_items(c, store_id, items, has_size)
+                if shortages:
+                    raise _PromoConflict("stock", {"shortages": shortages})
+
+                # ---------- Pha 2: GHI, chỉ chạy nếu Pha 1 pass hết ----------
+                _debit_stock_for_items(c, store_id, items, has_size, created_at)
+
+                if coupon_row:
+                    cur = c.execute(
+                        "UPDATE coupons SET used_count = used_count + 1 "
+                        "WHERE store_id=? AND code=? AND active=1 "
+                        "AND (expires_at IS NULL OR expires_at >= ?) "
+                        "AND (max_uses IS NULL OR used_count < max_uses)",
+                        (store_id, coupon_code, today))
+                    if cur.rowcount == 0:
+                        raise _PromoConflict("coupon", {"reason": "race_conflict"})
+
+                customer_id = None
+                if customer_row:
+                    cur = c.execute(
+                        "UPDATE customers SET "
+                        "  points_balance = points_balance - ? + ?, "
+                        "  order_count = order_count + 1, "
+                        "  total_spent = total_spent + ?, "
+                        "  last_order_at = ?, "
+                        "  name = COALESCE(NULLIF(?, ''), name), "
+                        "  address = COALESCE(NULLIF(?, ''), address) "
+                        "WHERE id=? AND points_balance >= ?",
+                        (points_to_redeem, points_earned, final_total, created_at,
+                         customer.get("name", ""), customer.get("address", ""),
+                         customer_row["id"], points_to_redeem))
+                    if cur.rowcount == 0:
+                        raise _PromoConflict("points", {"reason": "race_conflict"})
+                    customer_id = customer_row["id"]
+                elif phone:
+                    cur = c.execute(
+                        "INSERT INTO customers (store_id, phone, name, address, points_balance, "
+                        "  order_count, total_spent, first_order_at, last_order_at) "
+                        "VALUES (?,?,?,?,?,1,?,?,?)",
+                        (store_id, phone, customer.get("name", ""), customer.get("address", ""),
+                         points_earned, final_total, created_at, created_at))
+                    customer_id = cur.lastrowid
+
+                oid = _next_order_id()
+                c.execute(
+                    """INSERT INTO orders (id, store_id, items_json, subtotal, payment, status,
+                       channel, created_at, customer_name, customer_phone, customer_address,
+                       fb_psid, customer_id, payment_status, coupon_code, discount_amount,
+                       points_redeemed, points_earned)
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    (oid, store_id, json.dumps(items, ensure_ascii=False), subtotal, payment,
+                     "Chờ xác nhận", channel, created_at,
+                     customer.get("name", "Khách"), phone, customer.get("address", ""),
+                     customer.get("fb_psid"), customer_id, "chưa thanh toán", coupon_code,
+                     discount_amount, points_to_redeem, points_earned))
+
+                if points_to_redeem > 0:
+                    c.execute(
+                        "INSERT INTO loyalty_transactions (customer_id, order_id, delta, reason, created_at) "
+                        "VALUES (?,?,?,?,?)",
+                        (customer_id, oid, -points_to_redeem, "redeem_order", created_at))
+                if points_earned > 0:
+                    c.execute(
+                        "INSERT INTO loyalty_transactions (customer_id, order_id, delta, reason, created_at) "
+                        "VALUES (?,?,?,?,?)",
+                        (customer_id, oid, points_earned, "earn_order", created_at))
+        except _PromoConflict as e:
+            return None, {"kind": e.kind, **e.payload}
+
+    return get_order(oid, store_id), None
+
+
+def get_coupon(store_id: str, code: str) -> dict | None:
+    """Đọc không khoá — dùng cho PREVIEW ở engine.py (hiển thị giảm giá tạm trước khi
+    khách bấm gửi đơn). Validate CÓ HIỆU LỰC THẬT luôn chạy lại trong
+    create_order_with_promos() dưới `_order_lock`, nên lệch nhẹ ở preview (hiếm, vô hại
+    vì không ghi gì) là chấp nhận được."""
+    with _conn() as c:
+        row = c.execute("SELECT * FROM coupons WHERE store_id=? AND code=?",
+                         (store_id, code.strip().upper())).fetchone()
+    return dict(row) if row else None
+
+
+def list_coupons(store_id: str) -> list[dict]:
+    with _conn() as c:
+        rows = c.execute("SELECT * FROM coupons WHERE store_id=? ORDER BY id DESC",
+                          (store_id,)).fetchall()
+    return [dict(r) for r in rows]
+
+
+def create_coupon(store_id: str, code: str, type_: str, value: int,
+                   max_uses: int | None, expires_at: str | None) -> dict:
+    with _conn() as c:
+        c.execute(
+            "INSERT INTO coupons (store_id, code, type, value, max_uses, expires_at, created_at) "
+            "VALUES (?,?,?,?,?,?,?)",
+            (store_id, code.strip().upper(), type_, value, max_uses, expires_at, now_iso()))
+    return get_coupon(store_id, code)
+
+
+def update_coupon(store_id: str, code: str, patch: dict) -> dict | None:
+    allowed = {"type", "value", "max_uses", "active", "expires_at"}
+    fields = {k: v for k, v in patch.items() if k in allowed}
+    if not fields:
+        return get_coupon(store_id, code)
+    set_clause = ", ".join(f"{k}=?" for k in fields)
+    with _conn() as c:
+        c.execute(f"UPDATE coupons SET {set_clause} WHERE store_id=? AND code=?",
+                  (*fields.values(), store_id, code.strip().upper()))
+    return get_coupon(store_id, code)
+
+
+def delete_coupon(store_id: str, code: str) -> None:
+    with _conn() as c:
+        c.execute("DELETE FROM coupons WHERE store_id=? AND code=?",
+                  (store_id, code.strip().upper()))
+
+
+def get_customer(store_id: str, phone: str) -> dict | None:
+    phone = (phone or "").strip()
+    if not phone:
+        return None
+    with _conn() as c:
+        row = c.execute("SELECT * FROM customers WHERE store_id=? AND phone=?",
+                         (store_id, phone)).fetchone()
+    return dict(row) if row else None
+
+
+def list_customers(store_id: str) -> list[dict]:
+    with _conn() as c:
+        rows = c.execute(
+            "SELECT * FROM customers WHERE store_id=? ORDER BY last_order_at DESC",
+            (store_id,)).fetchall()
+    return [dict(r) for r in rows]
+
+
+def set_order_payment_status(oid: str, payment_status: str) -> dict | None:
+    with _conn() as c:
+        c.execute("UPDATE orders SET payment_status = ? WHERE id = ?", (payment_status, oid))
+    return get_order(oid)
+
+
+def adjust_stock_qty(store_id: str, code: str, delta: int, reason: str = "manual_adjust") -> None:
+    """Sửa tay tồn kho generic (ngành không-size) — dùng CHUNG `_order_lock` với tạo đơn
+    vì đụng cùng cột `products.stock_qty`; 2 lock khác nhau cho cùng 1 cột sẽ không chặn
+    nhau được gì."""
+    code = code.strip().upper()
+    with _order_lock:
+        with _conn() as c:
+            row = c.execute("SELECT stock_qty FROM products WHERE store_id=? AND code=?",
+                             (store_id, code)).fetchone()
+            if row is None or row["stock_qty"] is None:
+                raise ValueError("Sản phẩm này chưa bật theo dõi tồn kho (stock_qty rỗng)")
+            new_qty = row["stock_qty"] + delta
+            if new_qty < 0:
+                raise ValueError(f"Tồn kho sẽ âm ({new_qty}) — kiểm tra lại số lượng")
+            c.execute("UPDATE products SET stock_qty=? WHERE store_id=? AND code=?",
+                      (new_qty, store_id, code))
+            c.execute(
+                "INSERT INTO inventory_log (store_id, product_code, size, delta, reason, created_at) "
+                "VALUES (?,?,NULL,?,?,?)", (store_id, code, delta, reason, now_iso()))
+
+
 def get_order(oid: str, store_id: str | None = None) -> dict | None:
     q, args = "SELECT * FROM orders WHERE id = ?", [oid]
     if store_id:
@@ -679,3 +1111,71 @@ def flag_order(oid: str, note: str) -> dict | None:
         merged = f"{old}\n{entry}" if old else entry
         c.execute("UPDATE orders SET flagged = 1, flag_note = ? WHERE id = ?", (merged, oid))
     return get_order(oid)
+
+
+def unflag_order(oid: str) -> dict | None:
+    """Gỡ cờ sau khi nhân viên đã xử lý xong than phiền — GIỮ NGUYÊN `flag_note` (lịch sử
+    than phiền vẫn đọc lại được), chỉ tắt bit `flagged` để banner "cần xử lý" hết hiện."""
+    with _conn() as c:
+        c.execute("UPDATE orders SET flagged = 0 WHERE id = ?", (oid,))
+    return get_order(oid)
+
+
+# ==================== conversation_messages ====================
+
+def log_conversation_turn(store_id: str, channel: str, sender_id: str,
+                           inbound_text: str, received_at: str,
+                           outbound: list[dict]) -> None:
+    """Ghi 1 lượt hội thoại: 1 dòng 'in' + N dòng 'out', CÙNG 1 transaction, đúng thứ tự.
+    outbound: [{"msg_type": str, "text": str, "payload": dict}] — caller (engine.py) đã
+    dẹt sẵn message nội bộ, module này KHÔNG biết hình dạng message của engine.
+    Lỗi SQL (vd FK store_id lạ, DB locked) được NÉM RA — caller quyết định nuốt hay không.
+    """
+    rows = [(store_id, channel, sender_id, "in", "text", inbound_text, None, received_at)]
+    for m in outbound:
+        payload = m.get("payload")
+        rows.append((
+            store_id, channel, sender_id, "out",
+            m.get("msg_type", "text"), m.get("text", ""),
+            json.dumps(payload, ensure_ascii=False) if payload is not None else None,
+            now_iso(),
+        ))
+    with _conn() as c:
+        c.executemany(
+            """INSERT INTO conversation_messages
+                 (store_id, channel, sender_id, direction, msg_type, text, payload_json, created_at)
+               VALUES (?,?,?,?,?,?,?,?)""",
+            rows,
+        )
+
+
+def list_conversation_threads(store_id: str) -> list[dict]:
+    """[{channel, sender_id, message_count, last_direction, last_type, last_text, last_at}]
+    — gom nhóm theo (channel, sender_id), luồng có tin mới nhất lên đầu."""
+    with _conn() as c:
+        rows = c.execute(
+            """SELECT m.channel, m.sender_id, t.message_count,
+                      m.direction AS last_direction, m.msg_type AS last_type,
+                      m.text AS last_text, m.created_at AS last_at
+               FROM conversation_messages m
+               JOIN (SELECT channel, sender_id, MAX(id) AS last_id, COUNT(*) AS message_count
+                     FROM conversation_messages WHERE store_id = ?
+                     GROUP BY channel, sender_id) t ON m.id = t.last_id
+               ORDER BY m.id DESC""",
+            (store_id,),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def list_conversation_messages(store_id: str, channel: str, sender_id: str) -> list[dict]:
+    """[{id, direction, type, text, created_at}] ORDER BY id ASC. KHÔNG trả payload_json.
+    Luồng không có dòng nào -> []."""
+    with _conn() as c:
+        rows = c.execute(
+            """SELECT id, direction, msg_type AS type, text, created_at
+               FROM conversation_messages
+               WHERE store_id = ? AND channel = ? AND sender_id = ?
+               ORDER BY id ASC""",
+            (store_id, channel, sender_id),
+        ).fetchall()
+    return [dict(r) for r in rows]

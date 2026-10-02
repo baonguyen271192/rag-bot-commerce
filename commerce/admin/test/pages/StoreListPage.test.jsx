@@ -65,7 +65,7 @@ describe('StoreListPage — tách "cần xử lý" khỏi "đang hoạt động 
     // CTA của card "cần xử lý" phải trỏ thẳng vào tab Kênh, không phải tab Cấu hình mặc định.
     const ctas = screen.getAllByRole('link', { name: /Kết nối ngay/ })
     expect(ctas).toHaveLength(2)
-    expect(ctas[0]).toHaveAttribute('href', '/stores/shop2?tab=channels')
+    expect(ctas[0]).toHaveAttribute('href', '/stores/shop2/channels')
   })
 })
 

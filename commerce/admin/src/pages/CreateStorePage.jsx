@@ -332,7 +332,7 @@ function HandoffScreen({ store, ownerEmail, navigate }) {
             {copied ? <Check size={14} /> : <Copy size={14} />}
             {copied ? 'Đã copy' : 'Copy thông tin'}
           </button>
-          <button type="button" onClick={() => navigate(`/stores/${store.id}`)} className="btn-primary px-4 py-2 text-sm">
+          <button type="button" onClick={() => navigate(`/stores/${store.id}/config`)} className="btn-primary px-4 py-2 text-sm">
             Tới chi tiết cửa hàng
           </button>
         </div>

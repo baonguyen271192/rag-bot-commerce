@@ -25,6 +25,23 @@ describe('api.js — đường chạy thuận lợi', () => {
   })
 })
 
+describe('api.js — conversations', () => {
+  it('listConversations gọi đúng path theo store id', async () => {
+    mockFetchOnce({ ok: true, status: 200, json: async () => [] })
+    await api.listConversations('default')
+    expect(global.fetch).toHaveBeenCalledWith('/api/admin/stores/default/conversations', expect.any(Object))
+  })
+
+  it('getConversation phải encodeURIComponent phần sender_id (ký tự đặc biệt)', async () => {
+    mockFetchOnce({ ok: true, status: 200, json: async () => ({ channel: 'facebook', sender_id: 'a b/c', messages: [] }) })
+    await api.getConversation('default', 'facebook', 'a b/c')
+    expect(global.fetch).toHaveBeenCalledWith(
+      '/api/admin/stores/default/conversations/facebook/a%20b%2Fc',
+      expect.any(Object)
+    )
+  })
+})
+
 describe('api.js — trường hợp biên', () => {
   it('setChannel gửi đúng method PUT + đúng path theo store id/ctype', async () => {
     mockFetchOnce({ ok: true, status: 200, json: async () => ({ enabled: true }) })

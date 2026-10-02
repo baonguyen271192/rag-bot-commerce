@@ -34,6 +34,22 @@ export const api = {
   addMenuItem: (id, item) => request(`/api/admin/stores/${id}/menu`, { method: 'POST', body: JSON.stringify(item) }),
   removeMenuItem: (id, code) => request(`/api/admin/stores/${id}/menu/${code}`, { method: 'DELETE' }),
   listOrders: (storeId) => request(`/api/orders?store_id=${storeId}`),
+  advanceOrder: (oid) => request(`/api/orders/${oid}/advance`, { method: 'POST', body: JSON.stringify({}) }),
+  cancelOrder: (oid) => request(`/api/orders/${oid}/cancel`, { method: 'POST', body: JSON.stringify({}) }),
+  unflagOrder: (oid) => request(`/api/orders/${oid}/unflag`, { method: 'POST' }),
+  markOrderPaid: (oid) => request(`/api/orders/${oid}/mark-paid`, { method: 'POST' }),
+  markOrderRefunded: (oid) => request(`/api/orders/${oid}/mark-refunded`, { method: 'POST' }),
+  adjustStock: (id, code, delta, reason) =>
+    request(`/api/admin/stores/${id}/menu/${code}/stock-adjust`, { method: 'POST', body: JSON.stringify({ delta, reason }) }),
+  listCoupons: (id) => request(`/api/admin/stores/${id}/coupons`),
+  createCoupon: (id, body) => request(`/api/admin/stores/${id}/coupons`, { method: 'POST', body: JSON.stringify(body) }),
+  updateCoupon: (id, code, patch) =>
+    request(`/api/admin/stores/${id}/coupons/${code}`, { method: 'PUT', body: JSON.stringify(patch) }),
+  deleteCoupon: (id, code) => request(`/api/admin/stores/${id}/coupons/${code}`, { method: 'DELETE' }),
+  listCustomers: (id) => request(`/api/admin/stores/${id}/customers`),
+  listConversations: (id) => request(`/api/admin/stores/${id}/conversations`),
+  getConversation: (id, channel, senderId) =>
+    request(`/api/admin/stores/${id}/conversations/${channel}/${encodeURIComponent(senderId)}`),
   getChannels: (id) => request(`/api/admin/stores/${id}/channels`),
   setChannel: (id, ctype, cfg) =>
     request(`/api/admin/stores/${id}/channels/${ctype}`, { method: 'PUT', body: JSON.stringify(cfg) }),

@@ -1,31 +1,33 @@
 import { useEffect, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
-import { ChevronRight, KeyRound, LayoutGrid, LogOut, Menu, MessageCircle, Send, ShoppingBag, Store, X } from 'lucide-react'
+import { KeyRound, LayoutGrid, LogOut, Menu, ShoppingBag, Store, X } from 'lucide-react'
 import { api } from '../lib/api'
 import { useAuth } from '../lib/auth'
-import { EXPECTED_ROLE } from '../lib/console'
-import { BADGE_TONE_CLASS, badgeTone, channelCounts } from '../lib/channels'
+import { EXPECTED_ROLE, IS_PORTAL } from '../lib/console'
+import { STORE_SECTIONS, storeIdFromPath, storeSectionPath } from '../lib/store-nav'
+import StoreSwitcher from './StoreSwitcher'
 import ThemeToggle from './ThemeToggle'
 
-// IA sidebar 2 nhóm — "Tổng quan" (Tổng quan: digest cần xử lý ở "/", Cửa hàng: danh
-// sách quản lý ở "/stores") và "Kênh" (Facebook + Zalo cá nhân/OA). Xem
-// docs/channels-ia-mockup.html — nguồn thiết kế đã duyệt cho cấu trúc/nhãn/badge dưới đây.
+// IA sidebar 2 TẦNG ngữ cảnh (đổi từ IA phẳng cũ — xem lịch sử git cho bản trước đó):
+//   - Admin, CHƯA chọn cửa hàng: Tổng quan / Cửa hàng.
+//   - Admin, ĐANG xem 1 cửa hàng (/stores/:id): KHÔNG có nhóm mục nào thêm — admin chỉ
+//     quản lý danh sách cửa hàng + gói dịch vụ (xem StoreLayout.jsx), không xem/sửa được
+//     nội dung vận hành của cửa hàng nào cả — kể cả cấu hình KÊNH (Facebook/Zalo) của
+//     từng cửa hàng, nên nhóm nav "Kênh" tổng hợp (3 trang /channels/*, từng hiện ở đây)
+//     đã GỠ HẲN, không chỉ ẩn: 1 cửa hàng tự quản lý kênh của chính mình (giống chủ nhà
+//     cho thuê không tự ý chỉnh nội thất trong nhà người thuê, chỉ thu tiền thuê).
+//   - Portal: luôn hiện thẳng 7 mục (Cấu hình/Kênh/Menu/Đơn hàng/Hội thoại/Khách hàng/
+//     Khuyến mãi — xem lib/store-nav.js) của ĐÚNG cửa hàng duy nhất của chủ shop, không
+//     có mục "Cửa hàng" (danh sách) hay nhóm Kênh tổng hợp.
 export default function AppShell({ children }) {
   const location = useLocation()
   const navigate = useNavigate()
   const { user, logout } = useAuth()
   const path = location.pathname
   const onOverview = path === '/'
-  const onStoreList = path === '/stores'
-  const onFacebook = path === '/channels/facebook'
-  const onZaloPersonal = path === '/channels/zalo-personal'
-  const onZaloOa = path === '/channels/zalo-oa'
-  const onZaloChild = onZaloPersonal || onZaloOa
-
-  const [zaloOpen, setZaloOpen] = useState(onZaloChild)
-  useEffect(() => {
-    if (onZaloChild) setZaloOpen(true)
-  }, [onZaloChild])
+  // "Đang ở danh sách Cửa hàng" chỉ còn tính /stores và /stores/new — /stores/:id/* giờ
+  // có nhóm nav RIÊNG của chính cửa hàng đó, không còn làm sáng mục "Cửa hàng" nữa.
+  const onStoreList = path === '/stores' || path === '/stores/new'
 
   // Sidebar biến mất hoàn toàn dưới breakpoint sm (không gian quá hẹp cho 256px cố
   // định) — trên mobile thay bằng drawer trượt ra, mở/đóng qua nút hamburger, tự đóng
@@ -35,17 +37,27 @@ export default function AppShell({ children }) {
     setMobileNavOpen(false)
   }, [path])
 
-  // Badge [active]/[tổng cửa hàng] cho từng kênh — dùng đúng GET /api/admin/stores đã
-  // có (mỗi store summary có channels.{facebook,zalo_personal,zalo_oa}), không thêm
-  // API mới. Lỗi tải thì thôi, chỉ ẩn badge — sidebar không phải chỗ hiện ErrorBanner.
+  // Danh sách cửa hàng cho StoreSwitcher + đếm badge "Cửa hàng" — dùng đúng
+  // GET /api/admin/stores đã có, không thêm API mới, không gọi 2 lần. Lỗi tải thì thôi,
+  // chỉ ẩn badge/hiện placeholder — sidebar không phải chỗ hiện ErrorBanner.
   const [stores, setStores] = useState(null)
-  useEffect(() => {
+  function loadStores() {
     api.listStores().then(setStores).catch(() => setStores([]))
-  }, [])
+  }
+  useEffect(loadStores, [])
+  // Danh sách switcher là bản chụp lúc tải trang, KHÔNG polling — chỉ nạp lại khi điều
+  // hướng về "/" hoặc "/stores" (2 trang mà luồng tạo/xoá cửa hàng luôn quay về), để sau
+  // khi tạo/xoá xong, lần tới mở switcher thấy đúng danh sách mới.
+  useEffect(() => {
+    if (path === '/' || path === '/stores') loadStores()
+  }, [path])
 
-  const fb = channelCounts(stores, 'facebook')
-  const zca = channelCounts(stores, 'zalo_personal')
-  const oa = channelCounts(stores, 'zalo_oa')
+  // Cửa hàng đang xem: từ URL (/stores/:id/*) — admin KHÔNG tự suy ra cửa hàng nào cả
+  // khi chưa có trong URL; portal CHỈ có đúng 1 cửa hàng nên tự chọn nó ngay khi danh
+  // sách tải xong (chủ shop không cần/không có bước "chọn cửa hàng").
+  const activeStoreId = storeIdFromPath(path) ?? (IS_PORTAL ? stores?.[0]?.id ?? null : null)
+  const activeStore = stores?.find((s) => s.id === activeStoreId) ?? null
+  const showStoreNav = Boolean(activeStoreId)
 
   return (
     <div className="flex min-h-screen">
@@ -90,69 +102,49 @@ export default function AppShell({ children }) {
         </div>
 
         <nav className="flex flex-1 flex-col gap-1 overflow-y-auto">
+          <StoreSwitcher stores={stores} activeStoreId={activeStoreId} onNavigate={() => setMobileNavOpen(false)} />
+
           <NavLabel>Tổng quan</NavLabel>
           <NavItem to="/" icon={LayoutGrid} active={onOverview}>
             Tổng quan
           </NavItem>
-          <NavItem to="/stores" icon={Store} active={onStoreList}>
-            Cửa hàng
-            {stores && <NavBadge tone="default">{stores.length}</NavBadge>}
-          </NavItem>
-
-          <NavLabel>Kênh</NavLabel>
-          <NavItem to="/channels/facebook" icon={Send} active={onFacebook}>
-            Facebook
-            {stores && (
-              <NavBadge tone={badgeTone(fb.active, fb.total)} title={`${fb.active} đã kết nối / ${fb.total} cửa hàng`}>
-                {fb.active}/{fb.total}
-              </NavBadge>
-            )}
-          </NavItem>
-
-          <div>
-            <button
-              type="button"
-              onClick={() => setZaloOpen((o) => !o)}
-              aria-expanded={zaloOpen}
-              className={
-                'flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors ' +
-                (onZaloChild ? 'bg-fg/[0.06] text-fg' : 'text-fg/60 hover:bg-fg/[0.04] hover:text-fg/90')
-              }
+          {/* Portal vào thẳng 6 mục của cửa hàng mình, không cần mục "Cửa hàng" (danh
+              sách) — chủ shop chỉ có đúng 1 cửa hàng, danh sách không có gì để chọn. */}
+          {!IS_PORTAL && (
+            <NavItem
+              to={EXPECTED_ROLE === 'super_admin' || !stores?.length ? '/stores' : `/stores/${stores[0].id}`}
+              icon={Store}
+              active={onStoreList}
             >
-              <MessageCircle size={16} />
-              Zalo
-              <ChevronRight
-                size={15}
-                className={'ml-auto transition-transform ' + (zaloOpen ? 'rotate-90' : '')}
-              />
-            </button>
-            {zaloOpen && (
-              <div className="ml-4 mt-0.5 flex flex-col gap-0.5 border-l border-line pl-3">
-                <SubNavItem to="/channels/zalo-personal" active={onZaloPersonal}>
-                  Zalo cá nhân
-                  {stores && (
-                    <NavBadge
-                      tone={badgeTone(zca.active, zca.total)}
-                      title={`${zca.active} phiên đang chạy / ${zca.total} cửa hàng`}
-                    >
-                      {zca.active}/{zca.total}
-                    </NavBadge>
-                  )}
-                </SubNavItem>
-                <SubNavItem to="/channels/zalo-oa" active={onZaloOa}>
-                  Zalo OA
-                  {stores && (
-                    <NavBadge
-                      tone={badgeTone(oa.active, oa.total)}
-                      title={`${oa.active} đã kết nối / ${oa.total} cửa hàng · đang Beta`}
-                    >
-                      {oa.active}/{oa.total}
-                    </NavBadge>
-                  )}
-                </SubNavItem>
-              </div>
-            )}
-          </div>
+              Cửa hàng
+              {stores && <NavBadge>{stores.length}</NavBadge>}
+            </NavItem>
+          )}
+
+          {/* Nhóm các mục NỘI DUNG VẬN HÀNH của cửa hàng đang xem — CHỈ portal. Mô hình
+              phân quyền đã chốt (BA/PO, xem app/auth.py require_tenant_owner_store_access):
+              super_admin không xem/sửa được config bot, kênh, menu, đơn hàng, khách hàng,
+              khuyến mãi, hội thoại của BẤT KỲ cửa hàng nào — chỉ quản lý danh sách cửa
+              hàng + gói dịch vụ (xem StoreLayout.jsx, khối OwnerAccountCard/PlanCard thay
+              cho <Outlet> khi admin xem 1 cửa hàng) — nên không hiện mục nào ở đây dẫn tới
+              403 cho admin nữa. */}
+          {showStoreNav && IS_PORTAL && (
+            <>
+              <NavLabel>
+                <span className="block truncate" title={activeStore?.name}>
+                  {activeStore?.name || 'Cửa hàng'}
+                </span>
+              </NavLabel>
+              {STORE_SECTIONS.map((s) => {
+                const to = storeSectionPath(activeStoreId, s.key)
+                return (
+                  <NavItem key={s.key} to={to} icon={s.icon} active={path === to}>
+                    {s.label}
+                  </NavItem>
+                )
+              })}
+            </>
+          )}
         </nav>
 
         <div className="mt-auto pt-3">
@@ -247,27 +239,13 @@ function NavItem({ to, icon: Icon, active, children }) {
   )
 }
 
-function SubNavItem({ to, active, children }) {
-  return (
-    <Link
-      to={to}
-      className={
-        'flex items-center gap-2 rounded-md px-2.5 py-1.5 text-[13px] font-medium transition-colors ' +
-        (active ? 'bg-fg/[0.06] text-fg' : 'text-fg/60 hover:bg-fg/[0.04] hover:text-fg/90')
-      }
-    >
-      <span className={'h-1.5 w-1.5 rounded-full bg-current ' + (active ? 'opacity-100' : 'opacity-50')} />
-      {children}
-    </Link>
-  )
-}
-
-function NavBadge({ tone, title, children }) {
-  const cls = tone === 'default' ? 'bg-indigo-500/20 text-indigo-600 dark:text-indigo-200' : BADGE_TONE_CLASS[tone]
+// Chỉ còn 1 nơi gọi (badge số lượng "Cửa hàng"), nên bỏ luôn tham số `tone` — các badge
+// trạng thái/active-tổng theo kênh (BADGE_TONE_CLASS) đã gỡ cùng nhóm nav "Kênh".
+function NavBadge({ title, children }) {
   return (
     <span
       title={title}
-      className={'ml-auto rounded-full px-2 py-0.5 text-[10.5px] font-semibold tabular-nums ' + cls}
+      className="ml-auto rounded-full bg-indigo-500/20 px-2 py-0.5 text-[10.5px] font-semibold tabular-nums text-indigo-600 dark:text-indigo-200"
     >
       {children}
     </span>

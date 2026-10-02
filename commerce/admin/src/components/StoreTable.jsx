@@ -46,7 +46,7 @@ export default function StoreTable({ stores, limit }) {
           {shown.map(({ store: s, info }) => (
             <tr key={s.id} className="transition-colors hover:bg-fg/[0.02]">
               <td className="px-5 py-3">
-                <Link to={`/stores/${s.id}`} className="block w-fit rounded hover:underline focus-visible:outline-none">
+                <Link to={`/stores/${s.id}/config`} className="block w-fit rounded hover:underline focus-visible:outline-none">
                   <ChannelStoreCell store={s} />
                 </Link>
               </td>
@@ -61,7 +61,7 @@ export default function StoreTable({ stores, limit }) {
               <td className="px-5 py-3 text-right">
                 {info ? (
                   <Link
-                    to={`/stores/${s.id}?tab=channels`}
+                    to={`/stores/${s.id}/channels`}
                     className="btn-primary inline-flex items-center gap-1.5 px-3 py-1.5 text-xs"
                   >
                     Kết nối ngay
@@ -69,7 +69,7 @@ export default function StoreTable({ stores, limit }) {
                   </Link>
                 ) : (
                   <Link
-                    to={`/stores/${s.id}`}
+                    to={`/stores/${s.id}/config`}
                     className="inline-flex rounded-lg border border-line-strong px-3 py-1.5 text-xs font-medium text-fg transition-colors hover:bg-fg/[0.05]"
                   >
                     Xem

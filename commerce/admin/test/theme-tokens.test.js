@@ -29,12 +29,9 @@ const ALLOWED_WHITE = new Set([
   'src/components/AppShell.jsx', // icon logo trên badge gradient indigo→violet
   'src/components/ChannelsTab.jsx', // thumb tròn của Toggle
   'src/pages/CreateStorePage.jsx', // icon "Tạo cửa hàng" trên badge gradient
-  // Không có trong danh sách ngoại lệ mà .bangiao/thay-doi.md liệt kê tên (chỉ nêu
-  // đúng 3 file trên) NHƯNG cùng bản chất: text-white đặt trên nút nền
-  // bg-indigo-500 cố định (nút "Kết nối"), không phải nền trắng/surface theo theme.
-  // -> ghi vào whitelist để test không đỏ oan, nhưng CẦN NÊU LẠI với coder/reviewer
-  // vì báo cáo thay-doi.md nói "chỉ có 3 ngoại lệ" mà thực tế code có 4.
-  'src/pages/channels/FacebookChannelPage.jsx',
+  // text-white trên nút xác nhận của ConfirmDialog — nền nút LUÔN là màu đặc (btn-primary
+  // hoặc bg-rose-600 khi danger), không phải nền trắng/surface theo theme.
+  'src/components/ConfirmDialog.jsx',
 ])
 
 describe('index.css — 4 lớp override theme (đường chạy thuận lợi)', () => {

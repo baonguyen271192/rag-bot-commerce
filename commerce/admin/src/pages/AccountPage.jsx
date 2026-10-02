@@ -6,9 +6,10 @@ import ErrorBanner from '../components/ErrorBanner'
 // Đổi mật khẩu tự phục vụ (P1-4) — cho MỌI role đã đăng nhập (super_admin lẫn
 // tenant_owner). Chưa có component menu tài khoản/trang Settings sẵn có trong admin UI
 // (đã xác minh App.jsx/AppShell.jsx) nên đặt thành 1 trang riêng ở route /account, liên
-// kết từ khối user ở cuối sidebar (xem AppShell.jsx) — khác `OwnerAccountCard` ở
-// StoreDetailPage (đó là super_admin ĐẶT HỘ mật khẩu cho chủ shop khác, không cần mật
-// khẩu cũ); ở đây BẮT BUỘC nhập đúng mật khẩu hiện tại trước khi đổi.
+// kết từ khối user ở cuối sidebar (xem AppShell.jsx) — khác `OwnerAccountCard` ở trang
+// Cấu hình cửa hàng (pages/store/StoreConfigPage.jsx; đó là super_admin ĐẶT HỘ mật khẩu
+// cho chủ shop khác, không cần mật khẩu cũ); ở đây BẮT BUỘC nhập đúng mật khẩu hiện tại
+// trước khi đổi.
 export default function AccountPage() {
   const [oldPw, setOldPw] = useState('')
   const [newPw, setNewPw] = useState('')
@@ -95,7 +96,7 @@ function PasswordInput({ value, onChange, show, onToggle }) {
         type="button"
         onClick={onToggle}
         aria-label={show ? 'Ẩn' : 'Hiện'}
-        className="absolute right-1 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-md text-fg/40 transition-colors hover:text-fg/70"
+        className="absolute right-0 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-md text-fg/40 transition-colors hover:text-fg/70"
       >
         {show ? <EyeOff size={16} /> : <Eye size={16} />}
       </button>

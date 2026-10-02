@@ -120,15 +120,39 @@ def require_store_access_qs(store_id: str, user: dict = Depends(get_current_user
     return require_store_access(store_id, user)
 
 
+def require_tenant_owner_store_access(sid: str, user: dict = Depends(get_current_user)) -> dict:
+    """Như require_store_access, nhưng CHẶN LUÔN super_admin — dùng cho MỌI dữ liệu VẬN
+    HÀNH bên trong 1 cửa hàng (cấu hình bot/giọng AI, kênh, menu, đơn hàng, khách hàng,
+    khuyến mãi, hội thoại khách thật). Mô hình đã chốt (BA/PO): super_admin (nền tảng)
+    chỉ quản lý DANH SÁCH cửa hàng (tạo/xoá, `require_super_admin`) + GÓI dịch vụ
+    (`admin_set_plan`, cũng `require_super_admin`) — KHÔNG xem/sửa được nội dung vận hành
+    của bất kỳ cửa hàng nào, kể cả đọc; mỗi cửa hàng tự quản lý hoàn toàn của riêng mình.
+    Route chỉ cần XEM DANH TÍNH cơ bản (tên/badge ngành/gói/số liệu tổng — không phải nội
+    dung) như `admin_store_detail`/`GET /admin/stores` vẫn giữ `require_store_access`
+    thường, KHÔNG đổi sang hàm này."""
+    user = require_store_access(sid, user)
+    if user["role"] == "super_admin":
+        raise HTTPException(403, "Chỉ chủ cửa hàng mới quản lý được mục này")
+    return user
+
+
+def require_tenant_owner_store_access_qs(store_id: str, user: dict = Depends(get_current_user)) -> dict:
+    """Như require_tenant_owner_store_access nhưng đọc `store_id` từ QUERY PARAM — dùng cho
+    /api/orders* (xem require_store_access_qs)."""
+    return require_tenant_owner_store_access(store_id, user)
+
+
 def require_order_access(oid: str, user: dict = Depends(get_current_user)) -> dict:
     """Đơn hàng được tra theo `oid` một mình, không kèm store_id trên path — phải tự tra
-    ngược store_id của đơn rồi áp đúng luật tenant như require_store_access, nếu không
-    tenant_owner đã đăng nhập hợp lệ cho CHÍNH store của họ vẫn có thể sửa đơn của tenant
-    khác chỉ bằng cách đoán đúng mã đơn (mã đơn hiện là số tăng dần, dễ đoán)."""
+    ngược store_id của đơn rồi áp đúng luật tenant, nếu không tenant_owner đã đăng nhập
+    hợp lệ cho CHÍNH store của họ vẫn có thể sửa đơn của tenant khác chỉ bằng cách đoán
+    đúng mã đơn (mã đơn hiện là số tăng dần, dễ đoán). Đơn hàng là dữ liệu VẬN HÀNH của
+    cửa hàng (xem require_tenant_owner_store_access) — CHẶN LUÔN super_admin, không chỉ
+    chặn tenant khác."""
     order = repository.get_order(oid)
     if not order:
         raise HTTPException(404, "Đơn hàng không tồn tại")
-    require_store_access(order["store_id"], user)
+    require_tenant_owner_store_access(order["store_id"], user)
     return user
 
 

@@ -14,33 +14,39 @@ import {
 } from 'lucide-react'
 import { api } from '../lib/api'
 import { useAuth } from '../lib/auth'
+import { IS_PORTAL } from '../lib/console'
+import { useConfirm } from '../hooks/useConfirm'
+import ConfirmDialog from './ConfirmDialog'
 import ErrorBanner from './ErrorBanner'
 
 // Trang cấu hình kênh cho 1 cửa hàng. Mỗi loại kênh là 1 thẻ độc lập, tự giữ form
 // và tự gọi PUT/DELETE /api/admin/stores/{id}/channels/{ctype}. Sau mỗi lần lưu
-// gọi onChanged() để StoreDetailPage nạp lại store (badge kết nối, zalo_enabled…).
+// gọi onChanged() để trang cha (StoreLayout.jsx, qua reload()) nạp lại store (badge kết
+// nối, zalo_enabled…).
 export default function ChannelsTab({ store, onChanged }) {
   const ch = store.channels || {}
+  const { ask, dialogProps } = useConfirm()
   return (
     // max-w-[1100px] — như tab Cấu hình: khung ngoài (AppShell) rộng 1600px để bảng dữ
     // liệu dùng hết chỗ, nhưng thẻ bật/tắt kênh chỉ có vài input ngắn (Page ID, token)
     // nên cần tự giới hạn, không thì input/nút "Lưu" kéo giãn hết cỡ, rất xấu.
     <div className="max-w-[1100px] mx-auto space-y-5">
-      <FacebookChannel store={store} data={ch.facebook || {}} onChanged={onChanged} />
+      <ConfirmDialog {...dialogProps} />
+      <FacebookChannel store={store} data={ch.facebook || {}} onChanged={onChanged} askDisconnect={ask} />
       <ZaloPersonalChannel store={store} data={ch.zalo_personal || {}} onChanged={onChanged} />
-      <ZaloOaChannel store={store} data={ch.zalo_oa || {}} onChanged={onChanged} />
+      <ZaloOaChannel store={store} data={ch.zalo_oa || {}} onChanged={onChanged} askDisconnect={ask} />
     </div>
   )
 }
 
 // ── Facebook Messenger ────────────────────────────────────────────────────────
-function FacebookChannel({ store, data, onChanged }) {
+function FacebookChannel({ store, data, onChanged, askDisconnect }) {
   const [form, setForm] = useState({
     page_id: data.page_id || '',
     page_token: '',
   })
   const set = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }))
-  const save = useChannelSave(store.id, 'facebook', onChanged)
+  const save = useChannelSave(store.id, 'facebook', onChanged, askDisconnect)
 
   return (
     <ChannelCard
@@ -56,11 +62,15 @@ function FacebookChannel({ store, data, onChanged }) {
       canDisconnect={Boolean(data.page_id || data.has_page_token)}
     >
       <ErrorBanner message={save.error} />
+      {/* Portal: chủ shop hiếm khi tự lấy được 2 giá trị này (cần vào Facebook for
+          Developers) — chỉ nói rõ nhờ ai, không bịa link/nút "Kết nối bằng Facebook" vì
+          backend không có luồng OAuth nào thật. */}
+      {IS_PORTAL && <TechHelpNote what="Mã Fanpage và mã kết nối" />}
       <div className="grid gap-4 sm:grid-cols-2">
-        <Field label="Facebook Page ID">
+        <Field label={IS_PORTAL ? 'Mã Fanpage (Page ID)' : 'Facebook Page ID'}>
           <input value={form.page_id} onChange={set('page_id')} className="input" placeholder="110194…" />
         </Field>
-        <Field label="Page Access Token">
+        <Field label={IS_PORTAL ? 'Mã kết nối Fanpage (Page Access Token)' : 'Page Access Token'}>
           <SecretInput
             value={form.page_token}
             onChange={set('page_token')}
@@ -119,7 +129,7 @@ function ZaloPersonalChannel({ store, data, onChanged }) {
             {user?.role === 'super_admin' ? (
               <button
                 type="button"
-                onClick={() => navigate(`/stores/${store.id}?tab=config`)}
+                onClick={() => navigate(`/stores/${store.id}/config`)}
                 className="btn-primary mt-3 inline-flex items-center gap-1.5 px-3.5 py-2 text-xs"
               >
                 Đổi gói cho cửa hàng này
@@ -147,20 +157,32 @@ function ZaloPersonalChannel({ store, data, onChanged }) {
       busy={save.busy}
     >
       <ErrorBanner message={save.error} />
-      <InfoNote icon={QrCode}>
-        Đăng nhập Zalo (quét QR) và phiên đăng nhập nằm ở service <code className="text-sky-700 dark:text-sky-300">zalo-bridge</code>,
-        không lưu tại đây. Bật kênh xong cần <strong>khởi động lại zalo-bridge</strong> để nó mở phiên cho cửa hàng
-        này — bridge chỉ dò danh sách cửa hàng một lần lúc chạy.
-      </InfoNote>
-      <InfoNote icon={Info} tone="muted">
-        Trang quét QR trong admin chưa làm — hiện xem QR trực tiếp ở endpoint của bridge.
-      </InfoNote>
+      {IS_PORTAL ? (
+        // Portal: gộp 2 note kỹ thuật (tên service "zalo-bridge", "restart", "endpoint")
+        // thành 1 câu chủ shop hiểu được — ai làm bước kỹ thuật, chủ shop chỉ cần biết
+        // phải báo lại sau khi bật.
+        <InfoNote icon={QrCode}>
+          Cần quét mã QR bằng ứng dụng Zalo trên điện thoại để đăng nhập. Bước này do bên kỹ
+          thuật thực hiện — bật kênh xong hãy báo quản trị viên để được kết nối.
+        </InfoNote>
+      ) : (
+        <>
+          <InfoNote icon={QrCode}>
+            Đăng nhập Zalo (quét QR) và phiên đăng nhập nằm ở service <code className="text-sky-700 dark:text-sky-300">zalo-bridge</code>,
+            không lưu tại đây. Bật kênh xong cần <strong>khởi động lại zalo-bridge</strong> để nó mở phiên cho cửa hàng
+            này — bridge chỉ dò danh sách cửa hàng một lần lúc chạy.
+          </InfoNote>
+          <InfoNote icon={Info} tone="muted">
+            Trang quét QR trong admin chưa làm — hiện xem QR trực tiếp ở endpoint của bridge.
+          </InfoNote>
+        </>
+      )}
     </ChannelCard>
   )
 }
 
 // ── Zalo OA (khung — chưa có tài liệu chính thức) ─────────────────────────────
-function ZaloOaChannel({ store, data, onChanged }) {
+function ZaloOaChannel({ store, data, onChanged, askDisconnect }) {
   const [form, setForm] = useState({
     oa_id: data.oa_id || '',
     app_secret: '',
@@ -168,7 +190,7 @@ function ZaloOaChannel({ store, data, onChanged }) {
     oa_refresh_token: '',
   })
   const set = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }))
-  const save = useChannelSave(store.id, 'zalo_oa', onChanged)
+  const save = useChannelSave(store.id, 'zalo_oa', onChanged, askDisconnect)
 
   return (
     <ChannelCard
@@ -181,47 +203,60 @@ function ZaloOaChannel({ store, data, onChanged }) {
       onToggle={(enabled) => save.run({ enabled })}
       busy={save.busy}
       onDisconnect={() => save.disconnect()}
-      canDisconnect={Boolean(data.oa_id || data.has_oa_access_token)}
+      canDisconnect={!IS_PORTAL && Boolean(data.oa_id || data.has_oa_access_token)}
     >
       <ErrorBanner message={save.error} />
-      <div className="mb-4 flex items-start gap-2 rounded-lg border border-amber-500/25 bg-amber-500/10 px-3.5 py-2.5 text-xs text-amber-800 dark:text-amber-300">
-        <AlertTriangle size={14} className="mt-0.5 shrink-0" />
-        <span>
-          <strong>Chưa xác minh:</strong> tên các trường bên dưới là tạm đặt, chưa khớp API Zalo OA thật.
-          Webhook OA hiện chỉ định tuyến rồi bỏ qua, chưa trả lời. Đừng dùng ở production tới khi có tài liệu chính thức.
-        </span>
-      </div>
-      <div className="grid gap-4 sm:grid-cols-2">
-        <Field label="OA ID">
-          <input value={form.oa_id} onChange={set('oa_id')} className="input" placeholder="OA id…" />
-        </Field>
-        <Field label="App Secret">
-          <SecretInput value={form.app_secret} onChange={set('app_secret')}
-            placeholder={data.has_app_secret ? '••••••••' : ''} />
-        </Field>
-        <Field label="OA Access Token">
-          <SecretInput value={form.oa_access_token} onChange={set('oa_access_token')}
-            placeholder={data.has_oa_access_token ? '••••••••' : ''} />
-        </Field>
-        <Field label="OA Refresh Token">
-          <SecretInput value={form.oa_refresh_token} onChange={set('oa_refresh_token')}
-            placeholder={data.has_oa_refresh_token ? '••••••••' : ''} />
-        </Field>
-      </div>
-      <SecretHint hasSecret={data.has_oa_access_token} what="token" />
-      <SaveButton
-        busy={save.busy}
-        saved={save.saved}
-        onClick={() => {
-          const patch = { oa_id: form.oa_id }
-          for (const k of ['app_secret', 'oa_access_token', 'oa_refresh_token']) {
-            if (form[k]) patch[k] = form[k]
-          }
-          save.run(patch).then(() =>
-            setForm((f) => ({ ...f, app_secret: '', oa_access_token: '', oa_refresh_token: '' }))
-          )
-        }}
-      />
+      {IS_PORTAL ? (
+        // Portal: KHÔNG hiện 4 ô nhập — tên trường còn tạm đặt (xem khối "Chưa xác minh"
+        // ở nhánh !IS_PORTAL bên dưới) và webhook OA hiện chỉ định tuyến rồi bỏ qua, chưa
+        // trả lời thật. Cho chủ shop điền secret vào ô chưa chắc đúng tên vừa vô ích vừa
+        // tạo cảm giác "đã kết nối" sai. Công tắc bật/tắt ở ChannelCard vẫn dùng được.
+        <InfoNote icon={Info} tone="muted">
+          Kênh Zalo OA đang trong giai đoạn thử nghiệm, chưa trả lời khách được. Khi nào dùng
+          được, quản trị viên sẽ kết nối giúp bạn.
+        </InfoNote>
+      ) : (
+        <>
+          <div className="mb-4 flex items-start gap-2 rounded-lg border border-amber-500/25 bg-amber-500/10 px-3.5 py-2.5 text-xs text-amber-800 dark:text-amber-300">
+            <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+            <span>
+              <strong>Chưa xác minh:</strong> tên các trường bên dưới là tạm đặt, chưa khớp API Zalo OA thật.
+              Webhook OA hiện chỉ định tuyến rồi bỏ qua, chưa trả lời. Đừng dùng ở production tới khi có tài liệu chính thức.
+            </span>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="OA ID">
+              <input value={form.oa_id} onChange={set('oa_id')} className="input" placeholder="OA id…" />
+            </Field>
+            <Field label="App Secret">
+              <SecretInput value={form.app_secret} onChange={set('app_secret')}
+                placeholder={data.has_app_secret ? '••••••••' : ''} />
+            </Field>
+            <Field label="OA Access Token">
+              <SecretInput value={form.oa_access_token} onChange={set('oa_access_token')}
+                placeholder={data.has_oa_access_token ? '••••••••' : ''} />
+            </Field>
+            <Field label="OA Refresh Token">
+              <SecretInput value={form.oa_refresh_token} onChange={set('oa_refresh_token')}
+                placeholder={data.has_oa_refresh_token ? '••••••••' : ''} />
+            </Field>
+          </div>
+          <SecretHint hasSecret={data.has_oa_access_token} what="token" />
+          <SaveButton
+            busy={save.busy}
+            saved={save.saved}
+            onClick={() => {
+              const patch = { oa_id: form.oa_id }
+              for (const k of ['app_secret', 'oa_access_token', 'oa_refresh_token']) {
+                if (form[k]) patch[k] = form[k]
+              }
+              save.run(patch).then(() =>
+                setForm((f) => ({ ...f, app_secret: '', oa_access_token: '', oa_refresh_token: '' }))
+              )
+            }}
+          />
+        </>
+      )}
     </ChannelCard>
   )
 }
@@ -352,6 +387,18 @@ function InfoNote({ icon: Icon, children, tone }) {
   )
 }
 
+// Note dùng chung cho các ô cần hiểu biết kỹ thuật để điền (vd lấy token trên trang
+// quản trị Facebook for Developers) — chủ shop không tự mò, nhờ người phụ trách kỹ
+// thuật/đơn vị triển khai điền giúp. Không gọi API, không nhận lỗi.
+function TechHelpNote({ what }) {
+  return (
+    <InfoNote tone="muted" icon={Info}>
+      {what} lấy trong trang quản trị Fanpage trên Facebook for Developers. Nếu bạn không tự
+      lấy được, nhờ người phụ trách kỹ thuật hoặc đơn vị triển khai điền giúp — không cần tự mò.
+    </InfoNote>
+  )
+}
+
 function Field({ label, children }) {
   return (
     <label className="block">
@@ -377,7 +424,7 @@ function SecretInput({ value, onChange, placeholder }) {
         type="button"
         onClick={() => setShow((s) => !s)}
         aria-label={show ? 'Ẩn' : 'Hiện'}
-        className="absolute right-1 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-md text-fg/40 transition-colors hover:text-fg/70"
+        className="absolute right-0 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-md text-fg/40 transition-colors hover:text-fg/70"
       >
         {show ? <EyeOff size={16} /> : <Eye size={16} />}
       </button>
@@ -386,7 +433,7 @@ function SecretInput({ value, onChange, placeholder }) {
 }
 
 // Gom logic gọi API + trạng thái busy/saved/error dùng chung cho mọi kênh.
-function useChannelSave(storeId, ctype, onChanged) {
+function useChannelSave(storeId, ctype, onChanged, askDisconnect) {
   const [busy, setBusy] = useState(false)
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState('')
@@ -406,18 +453,25 @@ function useChannelSave(storeId, ctype, onChanged) {
     }
   }
 
-  async function disconnect() {
-    if (!window.confirm('Ngắt kết nối và xoá thông tin kênh này?')) return
-    setBusy(true)
-    setError('')
-    try {
-      await api.removeChannel(storeId, ctype)
-      onChanged()
-    } catch (err) {
-      setError(err.message)
-    } finally {
-      setBusy(false)
-    }
+  function disconnect() {
+    askDisconnect({
+      title: 'Ngắt kết nối kênh này?',
+      message: 'Xoá thông tin đăng nhập/token đã lưu của kênh này — cần nhập lại từ đầu nếu muốn bật lại.',
+      confirmLabel: 'Ngắt kết nối',
+      danger: true,
+      onConfirm: async () => {
+        setBusy(true)
+        setError('')
+        try {
+          await api.removeChannel(storeId, ctype)
+          onChanged()
+        } catch (err) {
+          setError(err.message)
+        } finally {
+          setBusy(false)
+        }
+      },
+    })
   }
 
   return { busy, saved, error, run, disconnect }

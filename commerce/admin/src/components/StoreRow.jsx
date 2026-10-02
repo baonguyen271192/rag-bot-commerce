@@ -8,7 +8,7 @@ export default function StoreRow({ store: s, bordered }) {
   const Icon = biz.icon
   return (
     <Link
-      to={`/stores/${s.id}`}
+      to={`/stores/${s.id}/config`}
       className={
         'group flex items-center justify-between gap-4 px-5 py-4 transition-colors hover:bg-fg/[0.03] focus-visible:bg-fg/[0.03] focus-visible:outline-none ' +
         (bordered ? 'border-t border-fg/[0.06]' : '')

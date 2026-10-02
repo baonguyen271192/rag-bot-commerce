@@ -10,7 +10,7 @@
 export const ADMIN_PREFIX = '/admin'
 export const PORTAL_PREFIX = '/portal'
 
-const IS_PORTAL = window.location.pathname.startsWith(PORTAL_PREFIX)
+export const IS_PORTAL = window.location.pathname.startsWith(PORTAL_PREFIX)
 
 export const CONSOLE_PREFIX = IS_PORTAL ? PORTAL_PREFIX : ADMIN_PREFIX
 export const OTHER_PREFIX = IS_PORTAL ? ADMIN_PREFIX : PORTAL_PREFIX

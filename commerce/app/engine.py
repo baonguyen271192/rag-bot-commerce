@@ -90,6 +90,7 @@ def _new_session(store_id: str = "default") -> dict:
     return {"state": "START", "cart": [], "pending_product": None,
             "customer": {"name": "", "phone": "", "address": ""},
             "payment": None, "my_orders": [], "store_id": store_id,
+            "coupon_code": None, "points_to_redeem": 0,
             "last_shown": []}  # mã các sản phẩm vừa hiện carousel — để đoán mã gõ tắt
 
 
@@ -147,6 +148,20 @@ def _product_carousel(elements: list, quick_replies=None) -> dict:
     if quick_replies:
         m["quick_replies"] = [{"title": t, "payload": p} for t, p in quick_replies]
     return m
+
+
+def _reply_log_text(m: dict) -> str:
+    """Dẹt 1 message nội bộ thành 1 dòng text đọc được cho transcript hội thoại (lưu DB
+    qua `store.log_conversation_turn`). type 'generic' (carousel sản phẩm) -> tóm tắt
+    '🛍 Gợi ý sản phẩm: <title1>, <title2>, ...' (tối đa 10 title, bỏ title rỗng). Mọi
+    type khác -> lấy thẳng `m.get('text', '')`.
+    Ghi chú: KHÔNG dùng lại zalo_adapter.to_zalo_sends() — hàm đó tách carousel thành
+    nhiều lần GỬI của riêng kênh Zalo và áp trần MAX_SENDS=10; transcript cần phản ánh
+    message GỐC của engine, không phải cách 1 kênh cụ thể gửi nó."""
+    if m.get("type") == "generic":
+        titles = [e.get("title", "") for e in m.get("elements", [])[:10] if e.get("title")]
+        return "🛍 Gợi ý sản phẩm: " + ", ".join(titles)
+    return m.get("text", "")
 
 
 def _product_card(p: dict, unit: str = "đôi") -> dict:
@@ -496,11 +511,41 @@ def _ask_payment(sess: dict) -> list[dict]:
     return [_msg("Cuối cùng, anh/chị chọn hình thức thanh toán ạ (COD = trả tiền khi nhận hàng):", qr)]
 
 
+def _promo_preview(sess: dict, subtotal: int) -> tuple[int, int, list[str]]:
+    """Tính giảm giá coupon + đổi điểm hiện đang gắn vào session (CHỈ ĐỂ HIỂN THỊ ở
+    REVIEW — đọc không khoá, có thể lệch nhẹ nếu trùng lúc có giao dịch khác; validate CÓ
+    HIỆU LỰC THẬT luôn chạy lại trong create_retail_order_with_promos() lúc submit).
+    Trả (discount_coupon, discount_points, dòng_hiển_thị)."""
+    store_id = sess.get("store_id", "default")
+    discount_coupon = discount_points = 0
+    lines: list[str] = []
+
+    code = sess.get("coupon_code")
+    if code:
+        coupon = store.get_coupon(store_id, code)
+        if coupon:
+            discount_coupon = store.calc_coupon_discount(coupon, subtotal)
+            lines.append(f"🏷️ Mã {code}: -{data.vnd(discount_coupon)}")
+
+    points = sess.get("points_to_redeem", 0)
+    if points:
+        st = _store(sess)
+        rate = st.get("loyalty_redeem_rate") or 0
+        remaining = max(subtotal - discount_coupon, 0)
+        discount_points = min(points * rate, remaining)
+        lines.append(f"⭐ Đổi {points} điểm: -{data.vnd(discount_points)}")
+
+    return discount_coupon, discount_points, lines
+
+
 def _review(sess: dict) -> list[dict]:
     cart = sess["cart"]
     cus = sess["customer"]
     subtotal = sum(it["line_total"] for it in cart)
     sess["state"] = "REVIEW"
+    discount_coupon, discount_points, promo_lines = _promo_preview(sess, subtotal)
+    final_total = subtotal - discount_coupon - discount_points
+
     lines = ["🧾 *XÁC NHẬN ĐƠN HÀNG*", "Anh/chị kiểm tra giúp em thông tin dưới đây ạ:", ""]
     for it in cart:
         lines.append(f"• {_item_label(it)} — {_qty_detail(it, sess)} = {data.vnd(it['line_total'])}")
@@ -511,8 +556,16 @@ def _review(sess: dict) -> list[dict]:
         f"📍 Giao tới: {cus['address']}",
         f"💳 Thanh toán: {sess['payment']}",
         "",
-        f"*Tổng cộng: {data.vnd(subtotal)}* (chưa gồm phí ship)",
+        f"Tạm tính: {data.vnd(subtotal)}",
+    ]
+    lines += promo_lines
+    if promo_lines:
+        lines.append(f"*Thành tiền: {data.vnd(final_total)}* (chưa gồm phí ship)")
+    else:
+        lines.append(f"*Tổng cộng: {data.vnd(subtotal)}* (chưa gồm phí ship)")
+    lines += [
         "",
+        "Có mã giảm giá? Nhắn `mã GIAM50`. Muốn đổi điểm? Nhắn `đổi 100 điểm`.",
         "Bấm nút bên dưới để chốt — shop sẽ gọi xác nhận ngay ạ. 💛",
     ]
     qr = [("✅ Gửi đơn", "SUBMIT"), ("✏️ Sửa giỏ", "MENU_CART"), ("❌ Huỷ", "CANCEL")]
@@ -601,14 +654,67 @@ def _handle_stock_shortage(sess: dict, shortages: list[dict]) -> list[dict]:
     return [_msg("\n".join(lines))] + _cart_summary(sess)
 
 
+_COUPON_KEYWORD_RE = re.compile(r"(?:ma\s*(?:giam\s*gia)?|coupon|voucher)[\s:]+([a-z0-9]{3,20})")
+_COUPON_BARE_RE = re.compile(r"^[A-Za-z0-9]{3,20}$")
+_POINTS_ALL_RE = re.compile(r"(doi|dung|su dung)?\s*(het|toan bo|tat ca)\s*diem")
+_POINTS_N_RE = re.compile(r"(?:doi|dung|su dung)?\s*(\d+)\s*diem")
+_CLEAR_COUPON = ("huy ma", "bo ma", "xoa ma", "khong dung ma")
+_CLEAR_POINTS = ("huy diem", "khong dung diem", "bo diem", "huy doi diem")
+
+
+def _try_review_promo(sess: dict, text: str) -> list[dict] | None:
+    """Nhận diện khách gõ mã giảm giá / yêu cầu đổi điểm lúc đang REVIEW. Trả `None` nếu
+    câu không liên quan (để rơi xuống các nhánh xử lý khác như cũ, không chặn gì)."""
+    s = assistant._strip(text)
+    store_id = sess.get("store_id", "default")
+
+    if s in _CLEAR_COUPON:
+        sess["coupon_code"] = None
+        return [_msg("Dạ đã bỏ mã giảm giá ạ.")] + _review(sess)
+    if s in _CLEAR_POINTS:
+        sess["points_to_redeem"] = 0
+        return [_msg("Dạ đã bỏ đổi điểm ạ.")] + _review(sess)
+
+    m = _COUPON_KEYWORD_RE.search(s)
+    code = m.group(1).upper() if m else None
+    if not code and _COUPON_BARE_RE.match(text.strip()):
+        # Token trần (không có từ khoá dẫn) — CHỈ coi là mã giảm giá nếu DB thực sự có mã
+        # này cho đúng store, để không đụng các câu ngắn khác (vd 'oke', mã sản phẩm) vốn
+        # đã được các nhánh TRƯỚC đó (SUBMIT alias, mã đơn DH...) xử lý rồi.
+        if store.get_coupon(store_id, text.strip()):
+            code = text.strip().upper()
+    if code:
+        if not store.get_coupon(store_id, code):
+            return [_msg(f"Dạ mã *{code}* không tồn tại ạ 😥 Anh/chị kiểm tra lại giúp em nhé.")] + _review(sess)
+        sess["coupon_code"] = code
+        return _review(sess)
+
+    if _POINTS_ALL_RE.search(s) or _POINTS_N_RE.search(s):
+        cus = store.get_customer(store_id, sess["customer"].get("phone", ""))
+        balance = cus["points_balance"] if cus else 0
+        if _POINTS_ALL_RE.search(s):
+            n = balance
+        else:
+            n = int(_POINTS_N_RE.search(s).group(1))
+        if n <= 0:
+            return [_msg("Dạ anh/chị hiện chưa có điểm để đổi ạ.")] + _review(sess)
+        if n > balance:
+            return [_msg(f"Dạ anh/chị đang có *{balance} điểm*, không đủ {n} điểm ạ.")] + _review(sess)
+        sess["points_to_redeem"] = n
+        return _review(sess)
+
+    return None
+
+
 def _do_submit(sess: dict) -> list[dict]:
     if not sess["cart"]:
         return _cart_summary(sess)
     cart = sess["cart"]
     cus = sess["customer"]
     subtotal = sum(it["line_total"] for it in cart)
+    store_id = sess.get("store_id", "default")
 
-    order, shortages = store.create_retail_order_checked(
+    order, error = store.create_retail_order_with_promos(
         items=cart, subtotal=subtotal,
         customer={"name": cus["name"], "phone": cus["phone"], "address": cus["address"],
                   "fb_psid": sess.get("psid")},
@@ -617,24 +723,49 @@ def _do_submit(sess: dict) -> list[dict]:
         # nữa (trước đây MỌI đơn — kể cả qua kênh khác — đều bị ghi nhầm "facebook").
         payment=sess["payment"], channel=sess.get("channel", "facebook"),
         created_at=data.now_vn().strftime("%d/%m/%Y %H:%M"),
-        store_id=sess.get("store_id", "default"), has_size=_has_size(sess),
+        store_id=store_id, has_size=_has_size(sess),
+        coupon_code=sess.get("coupon_code"), points_to_redeem=sess.get("points_to_redeem", 0),
     )
-    if shortages:
-        return _handle_stock_shortage(sess, shortages)
-    if _has_size(sess):
-        # Đơn vừa trừ tồn kho thẳng qua SQL (repository.create_order_with_stock), KHÔNG đi
-        # qua các hàm mutate của stores.py — phải tự xoá cache ở đây, nếu không bot sẽ tiếp
-        # tục báo tồn kho cũ (chưa trừ) cho khách kế tiếp dù DB đã đúng.
-        stores.invalidate(sess.get("store_id", "default"))
+    if error:
+        if error["kind"] == "stock":
+            return _handle_stock_shortage(sess, error["shortages"])
+        if error["kind"] == "coupon":
+            # Mã vừa hết hiệu lực đúng lúc khách chốt (hết lượt/hết hạn) — tự gỡ để khách
+            # không lặp lại lỗi vô hạn, không cần khách tự gõ lệnh huỷ mã.
+            sess["coupon_code"] = None
+            return [_msg("Dạ mã giảm giá vừa rồi không còn hiệu lực ạ (hết lượt/hết hạn) — "
+                         "em đã bỏ mã này, anh/chị bấm Gửi đơn lại giúp em nhé 🙏")] + _review(sess)
+        if error["kind"] == "points":
+            sess["points_to_redeem"] = 0
+            return [_msg("Dạ số điểm vừa đổi không còn đủ nữa ạ — em đã bỏ phần đổi điểm, "
+                         "anh/chị bấm Gửi đơn lại giúp em nhé 🙏")] + _review(sess)
+
+    # Tồn kho vừa trừ thẳng qua SQL (repository.create_order_with_promos), KHÔNG đi qua
+    # các hàm mutate của stores.py — phải tự xoá cache, cả 2 trường hợp có size VÀ
+    # stock_qty generic (không chỉ ngành có size như trước), nếu không bot sẽ tiếp tục báo
+    # tồn kho cũ (chưa trừ) cho khách kế tiếp dù DB đã đúng.
+    stores.invalidate(store_id)
+
     oid = order["id"]
     pay = sess["payment"]
     sess["my_orders"].append(oid)
     # reset để có thể đặt tiếp (giữ tên/địa chỉ cho tiện đặt lần sau — thật sự giữ được từ
     # giờ vì `_start_checkout` không còn xoá trắng vô điều kiện, xem hàm đó)
     sess["cart"], sess["state"], sess["payment"] = [], "MENU", None
+    sess["coupon_code"], sess["points_to_redeem"] = None, 0
+
+    final_total = order["subtotal"] - order["discount_amount"]
+    extra_lines = ""
+    if order.get("coupon_code"):
+        extra_lines += f"🏷️ Đã áp dụng mã {order['coupon_code']}\n"
+    if order.get("points_redeemed"):
+        extra_lines += f"⭐ Đã dùng {order['points_redeemed']} điểm\n"
+    if order.get("points_earned"):
+        extra_lines += f"✨ Tích thêm {order['points_earned']} điểm cho lần sau\n"
 
     body = (f"🎉 *Đặt hàng thành công!*  Mã đơn: *{oid}*\n"
-            f"💰 Tổng: {data.vnd(subtotal)} · {pay or ''}\n"
+            f"💰 Thành tiền: {data.vnd(final_total)} · {pay or ''}\n"
+            f"{extra_lines}"
             f"📍 Giao tới: {cus['address']}\n\n"
             f"Shop sẽ gọi *xác nhận trong ít phút* rồi giao hàng tận nơi cho anh/chị ạ.\n"
             f"Cảm ơn *{cus['name']}* đã tin tưởng *{_store(sess).get('shop_label','shop')}*! 💛")
@@ -851,17 +982,43 @@ def _ambiguous_code_prompt(sess: dict, hits: list[str]) -> list[dict]:
 
 # ---------------- Bộ điều phối chính ----------------
 
+def _log_turn(store_id: str, channel: str, sender_id: str, text: str,
+              received_at: str, replies: list[dict]) -> None:
+    """Ghi lại 1 lượt hội thoại (1 dòng 'in' + N dòng 'out') qua façade `store.py` — nuốt
+    MỌI exception (in cảnh báo, KHÔNG in nội dung tin nhắn): hỏng log không được làm hỏng
+    câu trả lời cho khách (vd store_id lạ vi phạm FK, DB locked). Bỏ qua (return sớm) nếu
+    không có sender_id (vd body relay thiếu trường, main.py hiện không validate)."""
+    if not sender_id:
+        return
+    try:
+        # NFC — khớp chuẩn hoá đã làm trong handle() (xem gotcha NFD ở đầu file) để
+        # transcript lưu đúng chuỗi mà bot đã dùng để so khớp, không phải byte gốc client gửi.
+        inbound_text = unicodedata.normalize("NFC", (text or "").strip())
+        outbound = [{"msg_type": m.get("type", "text"), "text": _reply_log_text(m), "payload": m}
+                    for m in replies]
+        store.log_conversation_turn(store_id, channel, sender_id, inbound_text, received_at, outbound)
+    except Exception as e:
+        print(f"[conv-log] ⚠ bỏ qua lượt log {store_id}/{channel}/{sender_id}: {type(e).__name__}")
+
+
 def handle_or_paused(sender_id: str, text: str, store_id: str = "default",
                       channel: str = "facebook") -> list[dict]:
     """Cổng vào DUY NHẤT dùng cho webhook Facebook thật + trình giả lập + kênh Zalo — chặn
     TRƯỚC khi vào handle() nếu store đang 'paused' (trước đây field này chỉ ghi nhận trên
     admin, không có tác dụng thật, khách vẫn nhận được trả lời bình thường).
     `channel` mặc định "facebook" để KHÔNG hồi quy webhook FB/simulator hiện có; kênh
-    khác (Zalo OA/Zalo cá nhân) truyền tường minh (xem main.py)."""
+    khác (Zalo OA/Zalo cá nhân) truyền tường minh (xem main.py).
+    Đây CŨNG là điểm ghi log hội thoại DUY NHẤT (bảng `conversation_messages`) — chụp
+    `received_at` TRƯỚC khi chạy logic (gọi LLM có thể mất vài giây) để mốc giờ của dòng
+    'in' phản ánh đúng lúc khách nhắn, không phải lúc bot trả lời xong."""
+    received_at = store.now_iso()
     if stores.get(store_id).get("status") == "paused":
-        return [_msg("Dạ hiện shop tạm ngừng nhận tin nhắn/đặt hàng, mong anh/chị thông "
-                      "cảm 🙏 Có gì cần gấp anh/chị liên hệ trực tiếp giúp em nhé.")]
-    return handle(sender_id, text, store_id, channel)
+        replies = [_msg("Dạ hiện shop tạm ngừng nhận tin nhắn/đặt hàng, mong anh/chị thông "
+                         "cảm 🙏 Có gì cần gấp anh/chị liên hệ trực tiếp giúp em nhé.")]
+    else:
+        replies = handle(sender_id, text, store_id, channel)
+    _log_turn(store_id, channel, sender_id, text, received_at, replies)
+    return replies
 
 
 def handle(sender_id: str, text: str, store_id: str = "default", channel: str = "facebook") -> list[dict]:
@@ -1186,6 +1343,14 @@ def handle(sender_id: str, text: str, store_id: str = "default", channel: str = 
             "gui don", "gửi đơn", "xac nhan", "xác nhận", "xac nhan don",
             "xác nhận đơn", "dong y", "đồng ý", "ok", "oke", "chot don", "chốt đơn"):
         return _submit(sess)
+
+    # Khách gõ mã giảm giá / yêu cầu đổi điểm khi đang xem lại đơn — PHẢI chạy trước nhánh
+    # match mã sản phẩm chung bên dưới (dòng ~1265), nếu không 1 mã coupon trùng ngẫu
+    # nhiên với mã sản phẩm sẽ bị nhánh đó nuốt mất, không bao giờ tới được đây.
+    if state == "REVIEW":
+        handled = _try_review_promo(sess, text)
+        if handled is not None:
+            return handled
 
     # Gõ CHỮ có mã đơn (vd 'tra đơn DH1026', 'DH1026') → tra thẳng, không hỏi xác minh.
     # Mã đơn thật của Commerce là 'DH<số>' (xem store._next_order_id) — 'BQ' là mã đơn sỉ

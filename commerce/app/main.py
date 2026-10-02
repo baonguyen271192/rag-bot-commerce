@@ -358,6 +358,8 @@ def _store_summary(st: dict) -> dict:
         "variant_mode": st.get("variant_mode", "so"), "variant_min": st.get("variant_min", 24),
         "variant_max": st.get("variant_max", 46), "variant_labels": st.get("variant_labels", []),
         "custom_prompt": st.get("custom_prompt", ""),
+        "loyalty_spend_per_point": st.get("loyalty_spend_per_point"),
+        "loyalty_redeem_rate": st.get("loyalty_redeem_rate"),
         "fb_page_id": st.get("fb_page_id", ""),
         "fb_connected": connected, "status": st.get("status", "active"),
         "channels": channels_out,
@@ -468,10 +470,12 @@ class StoreUpdate(BaseModel):
     status: Optional[str] = None
     custom_prompt: Optional[str] = None
     policies: Optional[Dict[str, str]] = None
+    loyalty_spend_per_point: Optional[int] = None
+    loyalty_redeem_rate: Optional[int] = None
 
 
 @router.put("/admin/stores/{sid}")
-def admin_update_store(sid: str, body: StoreUpdate, user: dict = Depends(auth.require_store_access)):
+def admin_update_store(sid: str, body: StoreUpdate, user: dict = Depends(auth.require_tenant_owner_store_access)):
     if not stores.exists(sid):
         raise HTTPException(404, "Cửa hàng không tồn tại")
     try:
@@ -555,7 +559,7 @@ class ChannelConfigBody(BaseModel):
 
 
 @router.get("/admin/stores/{sid}/channels")
-def admin_get_channels(sid: str, user: dict = Depends(auth.require_store_access)):
+def admin_get_channels(sid: str, user: dict = Depends(auth.require_tenant_owner_store_access)):
     if not stores.exists(sid):
         raise HTTPException(404, "Cửa hàng không tồn tại")
     return {ctype: _channel_public(ctype, stores.channel_config(sid, ctype) or {})
@@ -564,7 +568,7 @@ def admin_get_channels(sid: str, user: dict = Depends(auth.require_store_access)
 
 @router.put("/admin/stores/{sid}/channels/{ctype}")
 def admin_set_channel(sid: str, ctype: str, body: ChannelConfigBody,
-                       user: dict = Depends(auth.require_store_access)):
+                       user: dict = Depends(auth.require_tenant_owner_store_access)):
     if not stores.exists(sid):
         raise HTTPException(404, "Cửa hàng không tồn tại")
     if ctype not in stores.CHANNEL_TYPES:
@@ -582,7 +586,7 @@ def admin_set_channel(sid: str, ctype: str, body: ChannelConfigBody,
 
 
 @router.delete("/admin/stores/{sid}/channels/{ctype}")
-def admin_remove_channel(sid: str, ctype: str, user: dict = Depends(auth.require_store_access)):
+def admin_remove_channel(sid: str, ctype: str, user: dict = Depends(auth.require_tenant_owner_store_access)):
     if not stores.exists(sid):
         raise HTTPException(404, "Cửa hàng không tồn tại")
     if ctype not in stores.CHANNEL_TYPES:
@@ -598,10 +602,11 @@ class MenuItemBody(BaseModel):
     price: int
     color: str = ""
     sizes: Optional[Dict[str, int]] = None
+    stock_qty: Optional[int] = None
 
 
 @router.post("/admin/stores/{sid}/menu")
-def admin_add_menu(sid: str, body: MenuItemBody, user: dict = Depends(auth.require_store_access)):
+def admin_add_menu(sid: str, body: MenuItemBody, user: dict = Depends(auth.require_tenant_owner_store_access)):
     if not stores.exists(sid):
         raise HTTPException(404, "Cửa hàng không tồn tại")
     if stores.is_builtin(sid):
@@ -610,11 +615,119 @@ def admin_add_menu(sid: str, body: MenuItemBody, user: dict = Depends(auth.requi
 
 
 @router.delete("/admin/stores/{sid}/menu/{code}")
-def admin_remove_menu(sid: str, code: str, user: dict = Depends(auth.require_store_access)):
+def admin_remove_menu(sid: str, code: str, user: dict = Depends(auth.require_tenant_owner_store_access)):
     if stores.is_builtin(sid):
         raise HTTPException(400, "Cửa hàng dựng sẵn — menu chỉ đọc trong demo")
     stores.remove_menu_item(sid, code)
     return {"ok": True}
+
+
+class StockAdjustBody(BaseModel):
+    delta: int
+    reason: str = "manual_adjust"
+
+
+@router.post("/admin/stores/{sid}/menu/{code}/stock-adjust")
+def admin_adjust_stock(sid: str, code: str, body: StockAdjustBody,
+                        user: dict = Depends(auth.require_tenant_owner_store_access)):
+    """Sửa tay tồn kho generic (ngành không-size, field `stock_qty`) — ghi inventory_log."""
+    if stores.is_builtin(sid):
+        raise HTTPException(400, "Cửa hàng dựng sẵn — không sửa tồn kho demo")
+    try:
+        store.adjust_stock_qty(sid, code, body.delta, body.reason)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    stores.invalidate(sid)
+    return stores.products(sid).get(code.upper())
+
+
+class CouponBody(BaseModel):
+    code: str
+    type: str
+    value: int
+    max_uses: Optional[int] = None
+    expires_at: Optional[str] = None  # 'YYYY-MM-DD', để trống = không hết hạn
+
+
+@router.get("/admin/stores/{sid}/coupons")
+def admin_list_coupons(sid: str, user: dict = Depends(auth.require_tenant_owner_store_access)):
+    if not stores.exists(sid):
+        raise HTTPException(404, "Cửa hàng không tồn tại")
+    return store.list_coupons(sid)
+
+
+@router.post("/admin/stores/{sid}/coupons")
+def admin_create_coupon(sid: str, body: CouponBody, user: dict = Depends(auth.require_tenant_owner_store_access)):
+    if stores.is_builtin(sid):
+        raise HTTPException(400, "Cửa hàng dựng sẵn — không tạo khuyến mãi demo")
+    if body.type not in ("percent", "amount"):
+        raise HTTPException(400, "Loại khuyến mãi phải là 'percent' hoặc 'amount'")
+    if store.get_coupon(sid, body.code):
+        raise HTTPException(400, f"Mã '{body.code}' đã tồn tại")
+    return store.create_coupon(sid, body.code, body.type, body.value, body.max_uses, body.expires_at)
+
+
+class CouponUpdateBody(BaseModel):
+    type: Optional[str] = None
+    value: Optional[int] = None
+    max_uses: Optional[int] = None
+    expires_at: Optional[str] = None
+    active: Optional[bool] = None
+
+
+@router.put("/admin/stores/{sid}/coupons/{code}")
+def admin_update_coupon(sid: str, code: str, body: CouponUpdateBody,
+                         user: dict = Depends(auth.require_tenant_owner_store_access)):
+    if stores.is_builtin(sid):
+        raise HTTPException(400, "Cửa hàng dựng sẵn — không sửa khuyến mãi demo")
+    patch = body.dict(exclude_none=True)
+    if "active" in patch:
+        patch["active"] = int(bool(patch["active"]))
+    c = store.update_coupon(sid, code, patch)
+    if not c:
+        raise HTTPException(404, "Mã khuyến mãi không tồn tại")
+    return c
+
+
+@router.delete("/admin/stores/{sid}/coupons/{code}")
+def admin_delete_coupon(sid: str, code: str, user: dict = Depends(auth.require_tenant_owner_store_access)):
+    if stores.is_builtin(sid):
+        raise HTTPException(400, "Cửa hàng dựng sẵn — không xoá khuyến mãi demo")
+    store.delete_coupon(sid, code)
+    return {"ok": True}
+
+
+@router.get("/admin/stores/{sid}/customers")
+def admin_list_customers(sid: str, user: dict = Depends(auth.require_tenant_owner_store_access)):
+    if not stores.exists(sid):
+        raise HTTPException(404, "Cửa hàng không tồn tại")
+    return store.list_customers(sid)
+
+
+@router.get("/admin/stores/{sid}/conversations")
+def admin_list_conversations(sid: str, user: dict = Depends(auth.require_tenant_owner_store_access)):
+    """Danh sách luồng hội thoại (channel, sender_id) của 1 cửa hàng — chỉ-đọc, không
+    real-time. Chưa có tin nào -> [] (không phải 404). CHỈ chủ cửa hàng (tenant_owner) —
+    xem auth.require_tenant_owner_store_access."""
+    if not stores.exists(sid):
+        raise HTTPException(404, "Cửa hàng không tồn tại")
+    return store.list_conversation_threads(sid)
+
+
+@router.get("/admin/stores/{sid}/conversations/{channel}/{sender_id}")
+def admin_get_conversation(sid: str, channel: str, sender_id: str,
+                            user: dict = Depends(auth.require_tenant_owner_store_access)):
+    """Transcript đầy đủ (thứ tự `id ASC`) của 1 luồng. Luồng không có tin nào (vd đơn cũ
+    từ trước khi bật tính năng này) -> `messages: []`, KHÔNG 404."""
+    if not stores.exists(sid):
+        raise HTTPException(404, "Cửa hàng không tồn tại")
+    if channel not in stores.CHANNEL_TYPES:
+        raise HTTPException(400, "Loại kênh không hợp lệ")
+    return {
+        "channel": channel,
+        "sender_id": sender_id,
+        "messages": store.list_conversation_messages(sid, channel, sender_id),
+    }
 
 
 @router.get("/product-images")
@@ -625,13 +738,13 @@ def product_images(store_id: str):
 
 
 @router.get("/orders")
-def list_orders(store_id: str, user: dict = Depends(auth.require_store_access_qs)):
+def list_orders(store_id: str, user: dict = Depends(auth.require_tenant_owner_store_access_qs)):
     """Đơn của 1 cửa hàng — dùng cho console xem nhanh (chưa phải trang admin đầy đủ)."""
     return store.list_orders(store_id)
 
 
 @router.get("/orders/{oid}")
-def get_order(oid: str, store_id: str, user: dict = Depends(auth.require_store_access_qs)):
+def get_order(oid: str, store_id: str, user: dict = Depends(auth.require_tenant_owner_store_access_qs)):
     o = store.get_order(oid, store_id)
     if not o:
         raise HTTPException(404, "Đơn không tồn tại")
@@ -681,7 +794,40 @@ def cancel_order(oid: str, body: ActorBody, user: dict = Depends(auth.require_or
     o = store.get_order(oid)
     if not o:
         raise HTTPException(404, "Đơn không tồn tại")
+    # Đã thu tiền thật (payment_status) rồi mới huỷ -> cần hoàn tiền, khác với huỷ đơn
+    # CHƯA từng thu tiền (không có gì phải hoàn) — 2 trường hợp khác nghĩa tài chính.
+    if o.get("payment_status") == "đã thanh toán":
+        store.set_order_payment_status(oid, "cần hoàn tiền")
     return store.set_status(oid, "Đã huỷ")
+
+
+@router.post("/orders/{oid}/mark-paid")
+def mark_order_paid(oid: str, user: dict = Depends(auth.require_order_access)):
+    """Admin tự xác nhận đã nhận tiền (không tích hợp cổng thanh toán thật) — độc lập
+    với `status` (vòng đời giao hàng)."""
+    o = store.set_order_payment_status(oid, "đã thanh toán")
+    if not o:
+        raise HTTPException(404, "Đơn không tồn tại")
+    return o
+
+
+@router.post("/orders/{oid}/mark-refunded")
+def mark_order_refunded(oid: str, user: dict = Depends(auth.require_order_access)):
+    """Admin tự xác nhận đã hoàn tiền xong cho đơn ở trạng thái 'cần hoàn tiền'."""
+    o = store.set_order_payment_status(oid, "đã hoàn tiền")
+    if not o:
+        raise HTTPException(404, "Đơn không tồn tại")
+    return o
+
+
+@router.post("/orders/{oid}/unflag")
+def unflag_order(oid: str, user: dict = Depends(auth.require_order_access)):
+    """Đánh dấu đã xử lý xong than phiền của khách — gỡ banner "cần xử lý" khỏi admin UI,
+    không xoá lịch sử than phiền (xem repository.unflag_order())."""
+    o = store.unflag_order(oid)
+    if not o:
+        raise HTTPException(404, "Đơn không tồn tại")
+    return o
 
 
 app.include_router(router)

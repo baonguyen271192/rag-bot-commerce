@@ -288,10 +288,10 @@ def is_builtin(store_id: str) -> bool:
 
 
 def _menu_item(code: str, name: str, category: str, price: int, sizes: dict | None = None,
-               color: str = "") -> dict:
+               color: str = "", stock_qty: int | None = None) -> dict:
     return {"code": code.upper(), "name": name, "category": category or "Khác",
             "retail": int(price), "wholesale": int(price), "color": color,
-            "sizes": sizes or {}, "image": "", "images": []}
+            "sizes": sizes or {}, "stock_qty": stock_qty, "image": "", "images": []}
 
 
 # Chữ thường, số, gạch ngang — id này còn được dùng làm khoá phiên hội thoại
@@ -411,7 +411,8 @@ def provision_tenant_store(cfg: dict) -> dict:
 
 _EDITABLE = ("name", "shop_label", "business_type", "unit", "has_size",
              "variant_mode", "variant_min", "variant_max", "variant_labels",
-             "tone", "status", "custom_prompt")
+             "tone", "status", "custom_prompt",
+             "loyalty_spend_per_point", "loyalty_redeem_rate")
 
 
 def update_store(store_id: str, patch: dict) -> dict:
@@ -505,7 +506,7 @@ def add_menu_item(store_id: str, item: dict) -> dict:
         raise ValueError("Cửa hàng không tồn tại")
     sizes = item.get("sizes") or {}
     mi = _menu_item(item["code"], item["name"], item.get("category", ""), item["price"], sizes,
-                     item.get("color", ""))
+                     item.get("color", ""), item.get("stock_qty"))
     repository.upsert_product(store_id, mi)
     _invalidate(store_id)
     return mi
